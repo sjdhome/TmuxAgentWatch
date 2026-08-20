@@ -3,8 +3,8 @@
 //  TmuxAgentWatch
 //
 //  Double-click navigation: bring the exact GUI terminal window hosting a
-//  pane's tmux client to the front and make the pane's window the session's
-//  current window.
+//  pane's tmux client to the front and give the pane itself focus — its
+//  window becomes the session's current window and the pane its active pane.
 //
 
 import AppKit
@@ -22,15 +22,16 @@ enum PaneJump {
     /// Picks a tmux client attached to `session` whose process ancestry
     /// leads to a regular GUI app (Ghostty, Kitty, Terminal.app, iTerm2, … —
     /// anything with a Dock presence, so SSH or headless clients never
-    /// match), switches the session to `windowIndex`, and focuses the
-    /// specific terminal window rendering that client's tty. Window-precise
-    /// focus needs the Accessibility permission; without it the whole app is
-    /// activated instead. Beeps when there is nothing to focus.
-    static func reveal(session: String, windowIndex: UInt32) async {
+    /// match), focuses `paneID` inside the session (window switch plus
+    /// active-pane switch), and focuses the specific terminal window
+    /// rendering that client's tty. Window-precise focus needs the
+    /// Accessibility permission; without it the whole app is activated
+    /// instead. Beeps when there is nothing to focus.
+    static func reveal(session: String, paneID: String) async {
         // Test seam: UI tests verify the double-click wiring without
         // stealing focus or mutating tmux.
         if let dryRunLog = ProcessInfo.processInfo.environment["TAW_JUMP_DRY_RUN_LOG"] {
-            try? "\(session):\(windowIndex)".write(
+            try? "\(session):\(paneID)".write(
                 toFile: dryRunLog, atomically: true, encoding: .utf8)
             return
         }
@@ -54,16 +55,16 @@ enum PaneJump {
             return
         }
 
-        // Locate the hosting window before select-window: locating may
+        // Locate the hosting window before the pane switch: locating may
         // inject a title change on the client tty, which must not race with
-        // tmux's own title updates triggered by the window switch.
+        // tmux's own title updates triggered by the window/pane switch.
         let window = await locateWindow(of: app, clientTTY: client.tty)
 
         let switched = await Task.detached(priority: .userInitiated) {
-            TmuxClient.selectWindow(session: session, windowIndex: windowIndex)
+            TmuxClient.selectPane(paneID: paneID)
         }.value
         guard switched else {
-            logger.error("select-window failed for \(session, privacy: .public):\(windowIndex)")
+            logger.error("select-pane failed for \(paneID, privacy: .public)")
             NSSound.beep()
             return
         }

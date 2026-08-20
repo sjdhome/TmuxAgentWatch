@@ -29,9 +29,10 @@ Terminal"): if a tmux client attached to the
 pane's session is hosted by a GUI terminal on this machine (Ghostty, Kitty,
 Terminal.app, iTerm2, … — found by walking the client process's ancestry to
 the nearest Dock-visible app, so SSH or headless clients never match), the
-session is switched to the pane's window (`select-window`) and the exact
-terminal window hosting that client is raised and focused. When no GUI
-client is attached, the double-click just beeps.
+session is switched to the pane's window and the pane is made active
+(`select-window` + `select-pane`), and the exact terminal window hosting
+that client is raised and focused. When no GUI client is attached, the
+double-click just beeps.
 
 Window-precise focus needs the **Accessibility permission** (the system
 prompts on the first jump; grant TmuxAgentWatch under Privacy & Security →
@@ -50,8 +51,8 @@ localized formatting in every language.
 Next to the state, each row shows how long the pane has been in it,
 rendered with the system's localized duration formatting (`45s`, `1h 5m` in
 English), measured from the moment this app observed the state change. State changes appear within ~5 seconds (2s polling plus up to
-one debounce cycle). Apart from the double-click jump's `select-window`,
-the app only reads from tmux (`list-panes`, `capture-pane`,
+one debounce cycle). Apart from the double-click jump's `select-window` +
+`select-pane`, the app only reads from tmux (`list-panes`, `capture-pane`,
 `list-clients`) — it never writes to panes, sends input to agents, or
 touches their configs.
 
@@ -141,8 +142,8 @@ Inherited from the TUI's scope:
 - **Hook-based state reporting** — requires installing hook scripts into
   each agent's config; out of scope.
 - **Sending input to agents / pane content control** — the double-click
-  jump's `select-window` is the only tmux write verb; nothing else may
-  mutate tmux state.
+  jump's `select-window` + `select-pane` is the only tmux write verb;
+  nothing else may mutate tmux state.
 - **Selecting the exact terminal *tab*** — the jump raises the hosting
   window via Accessibility; picking a tab inside it would need per-terminal
   scripting APIs.

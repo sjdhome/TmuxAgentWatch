@@ -7,8 +7,8 @@
 //
 //  Only the read-only polling verbs (`list-panes`, `capture-pane`,
 //  `list-clients`) plus the single user-initiated navigation command
-//  (`select-window`, double-click jump) may appear in this file. The app
-//  must never write to panes or send input to agents.
+//  (`select-window` + `select-pane`, double-click jump) may appear in this
+//  file. The app must never write to panes or send input to agents.
 //
 
 import Foundation
@@ -99,14 +99,17 @@ nonisolated enum TmuxClient {
         return rustLines(result.stdout).compactMap { parseClientLine(String($0)) }
     }
 
-    /// The one write verb: make `windowIndex` the current window of
-    /// `session`, so attached clients show the pane the user double-clicked.
-    /// The `=` prefix forces an exact session-name match.
+    /// The one write verb: reveal the pane the user double-clicked. A pane
+    /// id (`%3`) is a globally unique tmux target, so `select-window` makes
+    /// the pane's window current in its session and `select-pane` makes the
+    /// pane itself active within that window — attached clients land with
+    /// focus on the exact pane.
     @discardableResult
-    static func selectWindow(session: String, windowIndex: UInt32) -> Bool {
+    static func selectPane(paneID: String) -> Bool {
         guard let tmuxPath,
             let result = try? runSubprocess(
-                tmuxPath, ["select-window", "-t", "=\(session):\(windowIndex)"]),
+                tmuxPath,
+                ["select-window", "-t", paneID, ";", "select-pane", "-t", paneID]),
             result.exitCode == 0
         else { return false }
         return true

@@ -106,8 +106,8 @@ struct ContentView: View {
         guard let pane = panes.first(where: { $0.id == id }) else { return }
         selection = pane.id
         let session = pane.info.session
-        let windowIndex = pane.info.windowIndex
-        Task { await PaneJump.reveal(session: session, windowIndex: windowIndex) }
+        let paneID = pane.info.paneID
+        Task { await PaneJump.reveal(session: session, paneID: paneID) }
     }
 }
 
