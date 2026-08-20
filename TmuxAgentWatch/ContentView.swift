@@ -6,54 +6,182 @@
 //
 
 import SwiftUI
-import SwiftData
 
 struct ContentView: View {
-    @Environment(\.modelContext) private var modelContext
-    @Query private var items: [Item]
+    @State private var model = WatchModel()
+    @State private var selection: AgentPane.ID?
+    @AppStorage("paneSortOrder") private var sortOrder: PaneSortOrder = .state
 
     var body: some View {
-        NavigationSplitView {
-            List {
-                ForEach(items) { item in
-                    NavigationLink {
-                        Text("Item at \(item.timestamp, format: Date.FormatStyle(date: .numeric, time: .standard))")
-                    } label: {
-                        Text(item.timestamp, format: Date.FormatStyle(date: .numeric, time: .standard))
+        TimelineView(.periodic(from: .now, by: 1)) { context in
+            content(now: context.date)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+        .navigationTitle("Tmux Agent Watch")
+        .navigationSubtitle(subtitle)
+        .toolbar {
+            ToolbarItem(placement: .primaryAction) {
+                Menu {
+                    Picker("Sort By", selection: $sortOrder) {
+                        Text("State").tag(PaneSortOrder.state)
+                        Text("Name").tag(PaneSortOrder.name)
                     }
+                    .pickerStyle(.inline)
+                } label: {
+                    Label("Sort", systemImage: "arrow.up.arrow.down")
                 }
-                .onDelete(perform: deleteItems)
+                .help("Change how agents are sorted")
             }
-            .navigationSplitViewColumnWidth(min: 180, ideal: 200)
-            .toolbar {
-                ToolbarItem {
-                    Button(action: addItem) {
-                        Label("Add Item", systemImage: "plus")
-                    }
-                }
+        }
+        .task { model.start() }
+        .onDisappear { model.stop() }
+    }
+
+    private var subtitle: String {
+        guard case .tree(let sessions)? = model.snapshot else { return "" }
+        let counts = StateCounts(sessions: sessions)
+        return String(
+            localized: "\(counts.blocked) blocked · \(counts.working) working · \(counts.idle) idle"
+        )
+    }
+
+    @ViewBuilder
+    private func content(now: Date) -> some View {
+        switch model.snapshot {
+        case nil:
+            ProgressView("Scanning…")
+        case .tmuxUnavailable(let message):
+            ContentUnavailableView {
+                Label("tmux Unavailable", systemImage: "exclamationmark.triangle")
+            } description: {
+                Text(verbatim: message)
+                Text("Retrying every 2 seconds.")
             }
-        } detail: {
-            Text("Select an item")
+        case .tree(let sessions) where sessions.isEmpty:
+            ContentUnavailableView {
+                Label("No Agent Panes", systemImage: "rectangle.dashed")
+            } description: {
+                Text("No tmux pane is currently running a known AI coding agent.")
+            }
+        case .tree(let sessions):
+            paneList(sessions, now: now)
         }
     }
 
-    private func addItem() {
-        withAnimation {
-            let newItem = Item(timestamp: Date())
-            modelContext.insert(newItem)
+    private func paneList(_ sessions: [SessionNode], now: Date) -> some View {
+        List(selection: $selection) {
+            ForEach(sortPanes(flattenPanes(sessions), by: sortOrder)) { pane in
+                PaneRow(pane: pane, now: now)
+                    // Fix the row height so the alternating stripes drawn
+                    // below the content share the same rhythm (they are
+                    // sized by defaultMinListRowHeight, not by the rows).
+                    .frame(height: PaneRow.rowHeight)
+                    .listRowInsets(
+                        EdgeInsets(top: 0, leading: 12, bottom: 0, trailing: 12))
+                    .tag(pane.id)
+            }
+        }
+        .listStyle(.inset)
+        .alternatingRowBackgrounds()
+        .environment(\.defaultMinListRowHeight, PaneRow.rowHeight)
+    }
+
+}
+
+/// One agent process. The pane's terminal title leads, the tmux window
+/// context comes second, and the agent identity is a small tag; state and
+/// time in state sit on the trailing side.
+private struct PaneRow: View {
+    static let rowHeight: CGFloat = 44
+
+    let pane: AgentPane
+    let now: Date
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Circle()
+                .fill(stateTint)
+                .frame(width: 10, height: 10)
+                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 2) {
+                HStack(spacing: 6) {
+                    Text(pane.displayName)
+                        .fontWeight(.medium)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                    Text(pane.agent.label)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal, 5)
+                        .padding(.vertical, 1)
+                        .background(.quaternary, in: Capsule())
+                    Text(pane.info.paneID)
+                        .font(.caption2.monospaced())
+                        .foregroundStyle(.tertiary)
+                }
+                Text(windowContext)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+            }
+            Spacer(minLength: 12)
+            VStack(alignment: .trailing, spacing: 2) {
+                Text(stateName)
+                    .fontWeight(pane.detection.state == .blocked ? .semibold : .regular)
+                    .foregroundStyle(stateLabelStyle)
+                Text(formatStateDuration(now.timeIntervalSince(pane.stateSince)))
+                    .font(.caption)
+                    .monospacedDigit()
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .accessibilityElement(children: .combine)
+    }
+
+    private var windowContext: String {
+        "\(pane.info.session) › \(pane.info.windowIndex): \(pane.info.windowName)"
+    }
+
+    private var stateName: LocalizedStringKey {
+        switch pane.detection.state {
+        case .blocked: return "blocked"
+        case .working: return "working"
+        case .idle, .unknown: return "idle"
         }
     }
 
-    private func deleteItems(offsets: IndexSet) {
-        withAnimation {
-            for index in offsets {
-                modelContext.delete(items[index])
-            }
+    private var stateTint: Color {
+        switch pane.detection.state {
+        case .blocked: return .red
+        case .working: return .green
+        case .idle, .unknown: return Color(nsColor: .tertiaryLabelColor)
+        }
+    }
+
+    private var stateLabelStyle: Color {
+        switch pane.detection.state {
+        case .blocked: return .red
+        case .working: return .green
+        case .idle, .unknown: return .secondary
         }
     }
 }
 
+/// Compact elapsed time via the system's localized duration formatting
+/// (e.g. "45s", "1h 5m" in English; localized unit names elsewhere).
+nonisolated func formatStateDuration(
+    _ interval: TimeInterval, locale: Locale = .current
+) -> String {
+    Duration.seconds(max(0, interval)).formatted(
+        .units(
+            allowed: [.days, .hours, .minutes, .seconds],
+            width: .narrow,
+            maximumUnitCount: 2
+        )
+        .locale(locale))
+}
+
 #Preview {
     ContentView()
-        .modelContainer(for: Item.self, inMemory: true)
 }

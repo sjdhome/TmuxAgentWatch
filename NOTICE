@@ -1,0 +1,12 @@
+TmuxAgentWatch
+Copyright 2026 sjdhome
+
+This macOS app is a Swift port of tmux-agent-watch
+(https://github.com/sjdhome/tmux-agent-watch, Apache-2.0), preserving its
+functionality and detection semantics.
+
+Detection manifests (TmuxAgentWatch/Resources/manifests.json, converted from
+TOML by scripts/convert-manifests.py) and the detection engine, agent
+identification, and macOS foreground-process discovery logic are derived from
+herdr (https://github.com/ogulcancelik/herdr), licensed under the Apache
+License, Version 2.0.
