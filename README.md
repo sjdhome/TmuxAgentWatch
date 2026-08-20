@@ -103,6 +103,19 @@ without one), because tmux otherwise sanitizes tabs and non-ASCII format
 output to `_`, breaking field parsing and pane titles
 (`TmuxClient.swift`).
 
+## Regenerating the app icon
+
+The icon (a tmux split-pane terminal with the app's three state dots and
+the green status bar) is drawn programmatically; to re-render all sizes
+into the asset catalog after tweaking `scripts/generate-app-icon.swift`:
+
+```sh
+xcrun swift scripts/generate-app-icon.swift   # from the project root
+```
+
+Sizes at or below 64 px use a simplified composition (dots and status bar
+only) so the icon still reads at Dock-menu sizes.
+
 ## Refreshing detection manifests
 
 The manifests are converted from the sibling `tmux-agent-watch` repository
