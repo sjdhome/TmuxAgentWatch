@@ -1,24 +1,33 @@
 #!/usr/bin/env python3
-"""Convert the vendored herdr detection manifests (TOML) to one JSON file.
+"""Convert herdr's detection manifests (TOML) to one JSON file.
 
-The manifests are maintained in the sibling tmux-agent-watch repository
-(vendored there verbatim from herdr, Apache-2.0; see NOTICE). This app
-bundles them as JSON so no TOML parser is needed at runtime.
+The manifests are maintained in herdr (Apache-2.0; see NOTICE) and read from
+a sibling checkout. This app bundles them as JSON so no TOML parser is
+needed at runtime.
 
 Usage:
   python3 scripts/convert-manifests.py [SOURCE_DIR] [OUT_FILE]
 
 Defaults:
-  SOURCE_DIR = ../tmux-agent-watch/src/detect/manifests
+  SOURCE_DIR = ../herdr/src/detect/manifests
   OUT_FILE   = TmuxAgentWatch/Resources/manifests.json
 """
 
 import json
+import re
 import sys
 import tomllib
 from pathlib import Path
 
 GATE_KEYS = ("contains", "regex", "line_regex", "all", "any", "not")
+
+# Rust's regex crate accepts \u{FE0E}; NSRegularExpression (ICU) only knows
+# \x{FE0E}. Rewrite the escape unless its backslash is itself escaped.
+_U_ESCAPE = re.compile(r"(?<!\\)((?:\\\\)*)\\u\{([0-9a-fA-F]{1,6})\}")
+
+
+def icu_pattern(pattern: str) -> str:
+    return _U_ESCAPE.sub(lambda m: m.group(1) + "\\x{" + m.group(2) + "}", pattern)
 
 
 def convert_gate(raw: dict) -> dict:
@@ -26,9 +35,11 @@ def convert_gate(raw: dict) -> dict:
     if unknown:
         raise SystemExit(f"unknown gate keys: {sorted(unknown)}")
     gate = {}
-    for key in ("contains", "regex", "line_regex"):
+    if raw.get("contains"):
+        gate["contains"] = raw["contains"]
+    for key in ("regex", "line_regex"):
         if raw.get(key):
-            gate[key] = raw[key]
+            gate[key] = [icu_pattern(pattern) for pattern in raw[key]]
     for key in ("all", "any", "not"):
         if raw.get(key):
             gate[key] = [convert_gate(nested) for nested in raw[key]]
@@ -77,7 +88,7 @@ def convert_manifest(path: Path) -> dict:
 
 def main() -> None:
     repo = Path(__file__).resolve().parent.parent
-    source = Path(sys.argv[1]) if len(sys.argv) > 1 else repo.parent / "tmux-agent-watch/src/detect/manifests"
+    source = Path(sys.argv[1]) if len(sys.argv) > 1 else repo.parent / "herdr/src/detect/manifests"
     out = Path(sys.argv[2]) if len(sys.argv) > 2 else repo / "TmuxAgentWatch/Resources/manifests.json"
 
     tomls = sorted(source.glob("*.toml"))

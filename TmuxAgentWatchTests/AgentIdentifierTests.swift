@@ -25,7 +25,10 @@ private func foregroundProcess(_ pid: UInt32, _ name: String, _ argv: [String])
     #expect(Agent.parse(label: "cursor-agent") == .cursor)
     #expect(Agent.parse(label: "ghcs") == .githubCopilot)
     #expect(Agent.parse(label: "opencode.exe") == .openCode)
+    #expect(Agent.parse(label: "opencode2") == .openCode)
     #expect(Agent.parse(label: "kiro-cli") == .kiro)
+    #expect(Agent.parse(label: "qwen") == .qwen)
+    #expect(Agent.parse(label: "Qwen Code") == .qwen)
     #expect(Agent.parse(label: "bash") == nil)
     #expect(Agent.parse(label: "vim") == nil)
     #expect(Agent.parse(label: "node") == nil)
@@ -95,6 +98,43 @@ private func foregroundProcess(_ pid: UInt32, _ name: String, _ argv: [String])
     let found = AgentIdentifier.identifyAgent(in: job)
     #expect(found?.0 == .pi)
     #expect(found?.1 == "pi")
+}
+
+@Test func versionedPythonWrapperIsDetected() {
+    let job = ForegroundJob(
+        processGroupID: 123,
+        processes: [
+            foregroundProcess(1, "python3.12", ["python3.12", "/usr/local/bin/hermes"])
+        ])
+    let found = AgentIdentifier.identifyAgent(in: job)
+    #expect(found?.0 == .hermes)
+    #expect(found?.1 == "hermes")
+}
+
+@Test func qwenPackageEntrypointIsDetected() {
+    let job = ForegroundJob(
+        processGroupID: 123,
+        processes: [
+            foregroundProcess(
+                123, "node",
+                ["node", "/usr/local/lib/node_modules/@qwen-code/qwen-code/dist/index.js"])
+        ])
+    let found = AgentIdentifier.identifyAgent(in: job)
+    #expect(found?.0 == .qwen)
+    #expect(found?.1 == "qwen")
+}
+
+@Test func qwenNodeEntrypointWithNonGenericTitleIsDetected() {
+    // Qwen never rewrites its process title; identification must fall back
+    // to the node script argument even when argv0 is not a runtime name.
+    let process = ForegroundProcess(
+        pid: 7, name: "node", argv0: "index.js",
+        argv: ["node", "/usr/lib/node_modules/@qwen-code/qwen-code/dist/index.js"],
+        cmdline: nil)
+    let job = ForegroundJob(processGroupID: 7, processes: [process])
+    let found = AgentIdentifier.identifyAgent(in: job)
+    #expect(found?.0 == .qwen)
+    #expect(found?.1 == "qwen")
 }
 
 @Test func plainShellJobIsNotAnAgent() {

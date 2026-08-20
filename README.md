@@ -118,17 +118,21 @@ only) so the icon still reads at Dock-menu sizes.
 
 ## Refreshing detection manifests
 
-The manifests are converted from the sibling `tmux-agent-watch` repository
-(vendored there verbatim from [herdr](https://github.com/ogulcancelik/herdr),
-Apache-2.0; see NOTICE):
+The manifests are converted straight from a sibling checkout of
+[herdr](https://github.com/ogulcancelik/herdr) (Apache-2.0; see NOTICE):
 
 ```sh
-python3 scripts/convert-manifests.py            # from ../tmux-agent-watch
+python3 scripts/convert-manifests.py            # reads ../herdr/src/detect/manifests
 python3 scripts/convert-manifests.py <src-dir>  # custom manifest dir
 ```
 
 Re-run the unit tests afterwards; they gate manifest count, agent-label
-mapping, and region coverage.
+mapping, and region coverage. If a manifest starts using a region this
+engine does not implement, port it in `Detect/DetectionEngine.swift`
+(mirroring herdr's `src/detect/manifest.rs`) and extend
+`regionIsSupported`. New agents also need a case in `Detect/Agent.swift`
+and any identification quirks ported into `Detect/AgentIdentifier.swift`
+from herdr's `src/detect/mod.rs`.
 
 ## Rejected features
 

@@ -30,6 +30,7 @@ nonisolated enum Agent: String, CaseIterable, Sendable {
     case hermes
     case kilo
     case qodercli
+    case qwen
     case maki
 
     /// Canonical label, matching the manifest `id` fields.
@@ -60,7 +61,7 @@ nonisolated enum Agent: String, CaseIterable, Sendable {
         case "cline": return .cline
         case "omp": return .omp
         case "mastracode", "mastra-code", "mastra code": return .mastracode
-        case "opencode", "open-code": return .openCode
+        case "opencode", "opencode2", "open-code": return .openCode
         case "copilot", "github-copilot", "ghcs": return .githubCopilot
         case "kimi", "kimi-code", "kimi code": return .kimi
         case "kiro", "kiro-cli": return .kiro
@@ -70,6 +71,7 @@ nonisolated enum Agent: String, CaseIterable, Sendable {
         case "hermes", "hermes-agent": return .hermes
         case "kilo", "kilo-code", "kilo code": return .kilo
         case "qodercli", "qoderclicn", "qoder", "qodercn": return .qodercli
+        case "qwen", "qwen-code", "qwen code": return .qwen
         case "maki": return .maki
         default: return nil
         }

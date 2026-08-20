@@ -75,6 +75,20 @@ nonisolated enum AgentIdentifier {
             return effective
         }
 
+        // Qwen Code never rewrites its process title, so a plain `node
+        // …/qwen.js` invocation is only identifiable through its script
+        // argument even when argv[0] is not a generic runtime name.
+        if let runtime = process.argv?.first {
+            let runtimeName = normalizedAgentLookupName(pathBasename(runtime))
+            if runtimeName == "node" || runtimeName == "bun",
+                let wrappedAgent = wrappedAgentNameFromRuntimeArgv(
+                    runtime: runtime, argv: process.argv),
+                Agent.parse(label: wrappedAgent) == .qwen
+            {
+                return wrappedAgent
+            }
+        }
+
         if let wrappedAgent = argv0AgentName(process.argv)
             ?? cmdlineArgv0AgentName(process.cmdline ?? "")
         {
@@ -93,7 +107,7 @@ nonisolated enum AgentIdentifier {
         switch runtime {
         case "node", "bun":
             return scriptArgAgentName(argv, evalFlags: ["-e", "--eval", "-p", "--print"], moduleFlags: [])
-        case "python", "python3":
+        case let name where isPythonRuntime(name):
             return scriptArgAgentName(argv, evalFlags: ["-c"], moduleFlags: ["-m"])
         case "sh", "bash", "zsh", "fish":
             return scriptArgAgentName(argv, evalFlags: ["-c"], moduleFlags: [])
@@ -174,12 +188,17 @@ nonisolated enum AgentIdentifier {
     private static func agentNameFromKnownPackagePath(_ path: String) -> String? {
         let components = path.split { $0 == "/" || $0 == "\\" }
             .map { normalizedAgentLookupName(String($0)) }
-        let needle = ["node_modules", "@earendil-works", "pi-coding-agent", "dist", "cli"]
+        let needles: [(needle: [String], agent: Agent)] = [
+            (["node_modules", "@earendil-works", "pi-coding-agent", "dist", "cli"], .pi),
+            (["node_modules", "@qwen-code", "qwen-code", "dist", "index"], .qwen),
+        ]
 
-        guard components.count >= needle.count else { return nil }
-        for start in 0...(components.count - needle.count)
-        where Array(components[start..<(start + needle.count)]) == needle {
-            return Agent.pi.label
+        for (needle, agent) in needles {
+            guard components.count >= needle.count else { continue }
+            for start in 0...(components.count - needle.count)
+            where Array(components[start..<(start + needle.count)]) == needle {
+                return agent.label
+            }
         }
         return nil
     }
@@ -216,8 +235,18 @@ nonisolated enum AgentIdentifier {
 
     private static func isGenericRuntimeOrShell(_ name: String) -> Bool {
         let name = normalizedAgentLookupName(pathBasename(name))
-        return ["sh", "bash", "zsh", "fish", "tmux", "node", "bun", "python", "python3"]
-            .contains(name)
+        return isPythonRuntime(name)
+            || ["sh", "bash", "zsh", "fish", "tmux", "node", "bun"].contains(name)
+    }
+
+    /// "python", or "python" followed by a dotted version ("python3",
+    /// "python3.12"), each dot-separated part all-digits.
+    private static func isPythonRuntime(_ name: String) -> Bool {
+        guard name.hasPrefix("python") else { return false }
+        let version = name.dropFirst("python".count)
+        if version.isEmpty { return true }
+        return version.split(separator: ".", omittingEmptySubsequences: false)
+            .allSatisfy { part in !part.isEmpty && part.allSatisfy { $0.isASCII && $0.isNumber } }
     }
 
     private static func pathBasename(_ path: String) -> String {

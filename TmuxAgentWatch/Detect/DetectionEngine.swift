@@ -306,6 +306,8 @@ nonisolated func regionText(input: DetectionInput, spec: String) -> String {
     case "whole_recent": return content
     case "after_last_prompt_marker": return afterLastPromptMarker(content)
     case "prompt_box_body": return promptBoxBody(content) ?? ""
+    case "above_prompt_box": return abovePromptBox(content)
+    case "last_non_empty_above_prompt_box": return lastNonEmptyLine(abovePromptBox(content))
     case "after_last_horizontal_rule": return afterLastHorizontalRule(content)
     default:
         if let count = regionCount(trimmed, "bottom_lines") {
@@ -328,7 +330,8 @@ nonisolated func regionIsSupported(_ spec: String) -> Bool {
     let trimmed = spec.trimmingCharacters(in: .whitespaces)
     switch trimmed {
     case "osc_title", "osc_progress", "whole_recent", "after_last_prompt_marker",
-        "prompt_box_body", "after_last_horizontal_rule":
+        "prompt_box_body", "above_prompt_box", "last_non_empty_above_prompt_box",
+        "after_last_horizontal_rule":
         return true
     default:
         return regionCount(trimmed, "bottom_lines") != nil
@@ -396,6 +399,20 @@ nonisolated private func afterLastHorizontalRule(_ content: String) -> String {
         lastRuleEnd = lineStart(content, lines, index + 1)
     }
     return String(content[lastRuleEnd...])
+}
+
+/// Everything before the prompt box's top border; whole content when no
+/// prompt box is on screen.
+nonisolated private func abovePromptBox(_ content: String) -> String {
+    let lines = rustLines(content)
+    guard let top = promptBoxTopBorderIndex(lines) else { return content }
+    return String(content[..<lineStart(content, lines, top)])
+}
+
+nonisolated private func lastNonEmptyLine(_ content: String) -> String {
+    rustLines(content)
+        .last { !$0.trimmingCharacters(in: .whitespaces).isEmpty }
+        .map(String.init) ?? ""
 }
 
 nonisolated private func promptBoxBody(_ content: String) -> String? {

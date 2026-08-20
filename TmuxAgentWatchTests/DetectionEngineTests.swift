@@ -94,6 +94,20 @@ private func compileJSON(_ json: String) throws -> CompiledManifest {
     #expect(regionText(input: screenInput("a\n────\nb"), spec: "prompt_box_body") == "")
 }
 
+@Test func abovePromptBoxSlicesBeforeTheTopRule() {
+    let content = "history\n✻ note\n\n────\n❯ hi\n────"
+    #expect(
+        regionText(input: screenInput(content), spec: "above_prompt_box")
+            == "history\n✻ note\n\n")
+    #expect(
+        regionText(input: screenInput(content), spec: "last_non_empty_above_prompt_box")
+            == "✻ note")
+    // No prompt box: whole content / its last non-empty line.
+    #expect(regionText(input: screenInput("a\nb\n"), spec: "above_prompt_box") == "a\nb\n")
+    #expect(
+        regionText(input: screenInput("a\nb\n"), spec: "last_non_empty_above_prompt_box") == "b")
+}
+
 @Test func unknownRegionIsEmpty() {
     #expect(regionText(input: screenInput("content"), spec: "no_such_region") == "")
     #expect(!regionIsSupported("no_such_region"))
@@ -262,7 +276,7 @@ private let priorityManifest = #"""
 
 @Test func allBundledManifestsParseAndCompile() {
     let bundled = Manifests.loadBundled()
-    #expect(bundled.count == 19)
+    #expect(bundled.count == 20)
     for manifest in bundled {
         let agent = Agent.parse(label: manifest.id)
         #expect(agent != nil, "manifest id \(manifest.id) is not a known agent")
@@ -270,7 +284,7 @@ private let priorityManifest = #"""
             agent?.manifestID == manifest.id,
             "manifest \(manifest.id): id must be the agent's canonical label")
     }
-    #expect(Manifests.compiled.count == 19)
+    #expect(Manifests.compiled.count == 20)
 }
 
 @Test func everyUsedRegionIsImplemented() {
@@ -282,4 +296,66 @@ private let priorityManifest = #"""
                 "manifest \(manifest.id) uses unimplemented region \(region)")
         }
     }
+}
+
+// MARK: - Claude busy-screen fallbacks (herdr 2026.08.19.1)
+//
+// Claude Code 2.1.228 replaced the braille OSC-title spinner with half
+// circles, so a busy pane without the new rules fell through to the
+// prompt-box idle rule. These screens must resolve as working.
+
+@Test func claudeHalfCircleSpinnerTitleIsWorking() throws {
+    let claude = try #require(Manifests.get("claude"))
+    let input = DetectionInput(screen: "", oscTitle: "◐ Cogitating", oscProgress: "")
+    let detection = evaluate(manifest: claude, input: input)
+    #expect(detection.state == .working)
+    #expect(detection.ruleID == "osc_title_working")
+}
+
+@Test func claudeBusyTurnBeatsVisiblePromptBox() throws {
+    let claude = try #require(Manifests.get("claude"))
+    let screen = """
+        ⏺ Reading files
+
+        ✻ Cogitating… (12s · ↓ 2.1k tokens · esc to interrupt)
+
+        ────────────────────────────
+        ❯
+        ────────────────────────────
+          ? for shortcuts
+        """
+    let detection = evaluate(manifest: claude, input: screenInput(screen))
+    #expect(detection.state == .working)
+    #expect(detection.ruleID == "live_turn_working")
+}
+
+@Test func claudeWaitingForBackgroundAgentsIsWorking() throws {
+    let claude = try #require(Manifests.get("claude"))
+    let screen = """
+        ⏺ Spawned 2 agents
+
+        ✽ Waiting for 2 background agents to finish
+
+        ────────────────────────────
+        ❯
+        ────────────────────────────
+        """
+    let detection = evaluate(manifest: claude, input: screenInput(screen))
+    #expect(detection.state == .working)
+    #expect(detection.ruleID == "background_agents_working")
+}
+
+@Test func claudeIdlePromptBoxStaysIdle() throws {
+    let claude = try #require(Manifests.get("claude"))
+    let screen = """
+        ⏺ Done.
+
+        ────────────────────────────
+        ❯
+        ────────────────────────────
+          ? for shortcuts
+        """
+    let detection = evaluate(manifest: claude, input: screenInput(screen))
+    #expect(detection.state == .idle)
+    #expect(detection.ruleID == "live_prompt_box")
 }
