@@ -82,6 +82,22 @@ nonisolated enum ProcessInspector {
         return children
     }
 
+    /// Parent PID of `pid`, or nil when the process is gone or has none.
+    ///
+    /// Uses `sysctl(KERN_PROC_PID)` rather than `proc_pidinfo`: ancestry
+    /// chains cross setuid-root processes (`/usr/bin/login` between a
+    /// terminal app and its shell), on which `proc_pidinfo` fails with EPERM
+    /// for a non-root caller while the sysctl works for any process.
+    static func parentPid(of pid: UInt32) -> UInt32? {
+        var mib: [Int32] = [CTL_KERN, KERN_PROC, KERN_PROC_PID, Int32(pid)]
+        var info = kinfo_proc()
+        var size = MemoryLayout<kinfo_proc>.size
+        guard sysctl(&mib, 4, &info, &size, nil, 0) == 0, size > 0,
+            info.kp_eproc.e_ppid > 0
+        else { return nil }
+        return UInt32(info.kp_eproc.e_ppid)
+    }
+
     /// Read `e_tpgid` (foreground process group of the controlling terminal).
     private static func foregroundProcessGroupID(pid: UInt32) -> UInt32? {
         guard let info = bsdInfo(pid: pid), info.e_tpgid > 0 else { return nil }

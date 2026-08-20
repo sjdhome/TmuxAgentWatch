@@ -5,8 +5,10 @@
 //  The single tmux boundary of the program, ported from tmux-agent-watch's
 //  src/tmux.rs.
 //
-//  Only read-only tmux verbs (`list-panes`, `capture-pane`) may ever appear
-//  in this file. The app must never send control commands to tmux.
+//  Only the read-only polling verbs (`list-panes`, `capture-pane`,
+//  `list-clients`) plus the single user-initiated navigation command
+//  (`select-window`, double-click jump) may appear in this file. The app
+//  must never write to panes or send input to agents.
 //
 
 import Foundation
@@ -23,6 +25,17 @@ nonisolated struct PaneInfo: Sendable, Equatable {
     var paneTitle: String
     /// Cheap hint only; pid-based identification stays authoritative.
     var currentCommand: String
+}
+
+/// One attached tmux client as reported by `list-clients`.
+nonisolated struct TmuxClientInfo: Sendable, Equatable {
+    /// PID of the `tmux` client process (runs inside the hosting terminal).
+    var pid: UInt32
+    /// The client's terminal device, e.g. "/dev/ttys003" — the tty the
+    /// hosting terminal window is rendering.
+    var tty: String
+    /// Name of the session the client is attached to.
+    var session: String
 }
 
 /// tmux could not be queried (server not running, binary missing, ...).
@@ -74,6 +87,31 @@ nonisolated enum TmuxClient {
         return result.stdout
     }
 
+    /// Clients currently attached to the server. Empty on any failure — a
+    /// failed lookup just means there is nothing to jump to.
+    static func listClients() -> [TmuxClientInfo] {
+        guard let tmuxPath,
+            let result = try? runSubprocess(
+                tmuxPath,
+                ["list-clients", "-F", "#{client_pid}\t#{client_tty}\t#{client_session}"]),
+            result.exitCode == 0
+        else { return [] }
+        return rustLines(result.stdout).compactMap { parseClientLine(String($0)) }
+    }
+
+    /// The one write verb: make `windowIndex` the current window of
+    /// `session`, so attached clients show the pane the user double-clicked.
+    /// The `=` prefix forces an exact session-name match.
+    @discardableResult
+    static func selectWindow(session: String, windowIndex: UInt32) -> Bool {
+        guard let tmuxPath,
+            let result = try? runSubprocess(
+                tmuxPath, ["select-window", "-t", "=\(session):\(windowIndex)"]),
+            result.exitCode == 0
+        else { return false }
+        return true
+    }
+
     static func parseListPanes(_ stdout: String) -> [PaneInfo] {
         rustLines(stdout).compactMap { parsePaneLine(String($0)) }
     }
@@ -95,6 +133,14 @@ nonisolated enum TmuxClient {
             panePid: panePid,
             paneTitle: String(fields[5]),
             currentCommand: String(fields[6]))
+    }
+
+    /// Parse one `list-clients` line. The session name (which may contain
+    /// anything but a newline) is the tail field.
+    static func parseClientLine(_ line: String) -> TmuxClientInfo? {
+        let fields = line.split(separator: "\t", maxSplits: 2, omittingEmptySubsequences: false)
+        guard fields.count == 3, let pid = UInt32(fields[0]) else { return nil }
+        return TmuxClientInfo(pid: pid, tty: String(fields[1]), session: String(fields[2]))
     }
 
     // MARK: - Subprocess plumbing

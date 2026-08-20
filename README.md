@@ -22,7 +22,26 @@ a window subtitle carrying the blocked/working/idle counts.
 The toolbar's sort menu offers two orders (`PaneSorting.swift`): by state —
 blocked, then idle, then working, ties broken by longer time in the current
 state, then by name — or by name alone; the choice persists across launches.
-Rows are selectable; selection carries no behavior yet.
+
+**Double-clicking a row — or pressing Return on the selection — jumps to
+the pane** (`PaneJump.swift`; also in the row's context menu as "Show in
+Terminal"): if a tmux client attached to the
+pane's session is hosted by a GUI terminal on this machine (Ghostty, Kitty,
+Terminal.app, iTerm2, … — found by walking the client process's ancestry to
+the nearest Dock-visible app, so SSH or headless clients never match), the
+session is switched to the pane's window (`select-window`) and the exact
+terminal window hosting that client is raised and focused. When no GUI
+client is attached, the double-click just beeps.
+
+Window-precise focus needs the **Accessibility permission** (the system
+prompts on the first jump; grant TmuxAgentWatch under Privacy & Security →
+Accessibility). Among multiple terminal windows, the hosting one is
+identified by writing an OSC 2 set-title escape carrying a one-shot token
+directly to the client's tty — only the window rendering that tty picks it
+up — and the previous title is restored right after. Without the
+permission, or if the terminal ignores OSC 2, the app is activated without
+raising a specific window. Terminals that put several sessions in tabs of
+one window get the right window, not the right tab.
 
 The UI is localized to Simplified Chinese via a String Catalog
 (`TmuxAgentWatch/Localizable.xcstrings`); durations use the system's
@@ -31,9 +50,10 @@ localized formatting in every language.
 Next to the state, each row shows how long the pane has been in it,
 rendered with the system's localized duration formatting (`45s`, `1h 5m` in
 English), measured from the moment this app observed the state change. State changes appear within ~5 seconds (2s polling plus up to
-one debounce cycle). The app never sends control commands to tmux — it only
-runs `list-panes` and `capture-pane` — and never touches your agents'
-configs.
+one debounce cycle). Apart from the double-click jump's `select-window`,
+the app only reads from tmux (`list-panes`, `capture-pane`,
+`list-clients`) — it never writes to panes, sends input to agents, or
+touches their configs.
 
 ## Requirements
 
@@ -101,6 +121,11 @@ mapping, and region coverage.
 
 Inherited from the TUI's scope:
 
-- **Jump-to-pane / any tmux control** — this app stays strictly read-only.
 - **Hook-based state reporting** — requires installing hook scripts into
   each agent's config; out of scope.
+- **Sending input to agents / pane content control** — the double-click
+  jump's `select-window` is the only tmux write verb; nothing else may
+  mutate tmux state.
+- **Selecting the exact terminal *tab*** — the jump raises the hosting
+  window via Accessibility; picking a tab inside it would need per-terminal
+  scripting APIs.

@@ -69,8 +69,9 @@ struct ContentView: View {
     }
 
     private func paneList(_ sessions: [SessionNode], now: Date) -> some View {
-        List(selection: $selection) {
-            ForEach(sortPanes(flattenPanes(sessions), by: sortOrder)) { pane in
+        let panes = sortPanes(flattenPanes(sessions), by: sortOrder)
+        return List(selection: $selection) {
+            ForEach(panes) { pane in
                 PaneRow(pane: pane, now: now)
                     // Fix the row height so the alternating stripes drawn
                     // below the content share the same rhythm (they are
@@ -78,14 +79,36 @@ struct ContentView: View {
                     .frame(height: PaneRow.rowHeight)
                     .listRowInsets(
                         EdgeInsets(top: 0, leading: 12, bottom: 0, trailing: 12))
+                    .accessibilityIdentifier("pane-row")
                     .tag(pane.id)
             }
         }
         .listStyle(.inset)
         .alternatingRowBackgrounds()
         .environment(\.defaultMinListRowHeight, PaneRow.rowHeight)
+        // primaryAction is the list's native row activation: double-click.
+        .contextMenu(forSelectionType: AgentPane.ID.self) { ids in
+            if !ids.isEmpty {
+                Button("Show in Terminal") { jump(toID: ids.first, in: panes) }
+            }
+        } primaryAction: { ids in
+            jump(toID: ids.first, in: panes)
+        }
+        // Return activates the selected row, like Finder.
+        .onKeyPress(.return) {
+            guard selection != nil else { return .ignored }
+            jump(toID: selection, in: panes)
+            return .handled
+        }
     }
 
+    private func jump(toID id: AgentPane.ID?, in panes: [AgentPane]) {
+        guard let pane = panes.first(where: { $0.id == id }) else { return }
+        selection = pane.id
+        let session = pane.info.session
+        let windowIndex = pane.info.windowIndex
+        Task { await PaneJump.reveal(session: session, windowIndex: windowIndex) }
+    }
 }
 
 /// One agent process. The pane's terminal title leads, the tmux window

@@ -47,6 +47,27 @@ import Testing
     #expect(panes[1].paneID == "%5")
 }
 
+// MARK: - list-clients parsing
+
+@Test func parseClientLineParsesFields() throws {
+    let client = try #require(TmuxClient.parseClientLine("4242\t/dev/ttys003\tmy project"))
+    #expect(client.pid == 4242)
+    #expect(client.tty == "/dev/ttys003")
+    #expect(client.session == "my project")
+}
+
+@Test func parseClientLineKeepsTabsInSessionName() throws {
+    let client = try #require(TmuxClient.parseClientLine("7\t/dev/ttys001\ta\tb"))
+    #expect(client.session == "a\tb")
+}
+
+@Test func parseClientLineRejectsMalformedLines() {
+    #expect(TmuxClient.parseClientLine("") == nil)
+    #expect(TmuxClient.parseClientLine("no-tab") == nil)
+    #expect(TmuxClient.parseClientLine("7\t/dev/ttys001") == nil)
+    #expect(TmuxClient.parseClientLine("NaN\t/dev/ttys001\tsession") == nil)
+}
+
 // MARK: - Snapshot pipeline
 
 private func pane(_ session: String, _ window: UInt32, _ id: String) -> AgentPane {
