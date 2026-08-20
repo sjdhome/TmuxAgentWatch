@@ -1,4 +1,4 @@
-# TmuxAgentWatch
+# Tmux Agent Watch
 
 A native macOS app that watches your existing tmux server and shows every
 pane running an AI coding agent (Claude Code, Codex, Gemini CLI, pi, and ~20
@@ -35,7 +35,7 @@ that client is raised and focused. When no GUI client is attached, the
 double-click just beeps.
 
 Window-precise focus needs the **Accessibility permission** (the system
-prompts on the first jump; grant TmuxAgentWatch under Privacy & Security →
+prompts on the first jump; grant Tmux Agent Watch under Privacy & Security →
 Accessibility). Among multiple terminal windows, the hosting one is
 identified by writing an OSC 2 set-title escape carrying a one-shot token
 directly to the client's tty — only the window rendering that tty picks it
@@ -44,9 +44,11 @@ permission, or if the terminal ignores OSC 2, the app is activated without
 raising a specific window. Terminals that put several sessions in tabs of
 one window get the right window, not the right tab.
 
-The UI is localized to Simplified Chinese via a String Catalog
-(`TmuxAgentWatch/Localizable.xcstrings`); durations use the system's
-localized formatting in every language.
+The UI is localized to Simplified Chinese via String Catalogs
+(`TmuxAgentWatch/Localizable.xcstrings`, plus
+`TmuxAgentWatch/InfoPlist.xcstrings` for the app's display name — "Tmux
+Agent Watch" / "Tmux Agent 监视器"); durations use the system's localized
+formatting in every language.
 
 Next to the state, each row shows how long the pane has been in it,
 rendered with the system's localized duration formatting (`45s`, `1h 5m` in

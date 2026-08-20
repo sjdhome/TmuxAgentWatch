@@ -142,7 +142,14 @@
       }
     },
     "Tmux Agent Watch" : {
-      "shouldTranslate" : false
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tmux Agent 监视器"
+          }
+        }
+      }
     },
     "working" : {
       "localizations" : {
