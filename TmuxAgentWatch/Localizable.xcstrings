@@ -21,6 +21,16 @@
         }
       }
     },
+    "Cannot Find a Terminal Window" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "找不到终端窗口"
+          }
+        }
+      }
+    },
     "Change how agents are sorted" : {
       "localizations" : {
         "zh-Hans" : {
@@ -57,6 +67,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "没有 Agent 面板"
+          }
+        }
+      }
+    },
+    "No GUI terminal on this Mac is attached to tmux session “%@” — the session may be detached, or attached only from SSH. Attach to it from a local terminal app first." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "这台 Mac 上没有 GUI 终端连接到 tmux 会话“%@”——该会话可能处于 detach 状态，或仅从 SSH 连接。请先在本机终端应用中 attach 到该会话。"
           }
         }
       }

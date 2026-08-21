@@ -26,7 +26,9 @@ enum PaneJump {
     /// active-pane switch), and focuses the specific terminal window
     /// rendering that client's tty. Window-precise focus needs the
     /// Accessibility permission; without it the whole app is activated
-    /// instead. Beeps when there is nothing to focus.
+    /// instead. When no attached client leads to a GUI terminal (nothing
+    /// attached at all, or only SSH/headless clients) an error alert is
+    /// shown instead of failing silently.
     static func reveal(session: String, paneID: String) async {
         // Test seam: UI tests verify the double-click wiring without
         // stealing focus or mutating tmux.
@@ -51,7 +53,7 @@ enum PaneJump {
         }
         guard let (client, app) = hosting else {
             logger.info("no GUI terminal client attached to \(session, privacy: .public)")
-            NSSound.beep()
+            presentNoTerminalAlert(session: session)
             return
         }
 
@@ -76,6 +78,22 @@ enum PaneJump {
         }
         NSApplication.shared.yieldActivation(to: app)
         app.activate()
+    }
+
+    /// Error alert for the one failure the user needs to know about:
+    /// nothing to focus, because no client attached to the session traces
+    /// back to a GUI terminal app — the session has no attached client at
+    /// all, or only SSH/headless ones.
+    private static func presentNoTerminalAlert(session: String) {
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = String(localized: "Cannot Find a Terminal Window")
+        alert.informativeText = String(
+            localized:
+                "No GUI terminal on this Mac is attached to tmux session “\(session)” — the session may be detached, or attached only from SSH. Attach to it from a local terminal app first."
+        )
+        NSApplication.shared.activate()
+        alert.runModal()
     }
 
     // MARK: - Finding the hosting terminal app
