@@ -359,3 +359,83 @@ private let priorityManifest = #"""
     #expect(detection.state == .idle)
     #expect(detection.ruleID == "live_prompt_box")
 }
+
+// MARK: - Claude background MCP tasks (herdr 2026.08.21.1)
+//
+// Claude Code moves MCP calls longer than 120s to a background task and
+// ends the turn: the OSC title and prompt box return to their idle shapes
+// while the task keeps running. The activity summary line is the only
+// stable signal, so it must keep the pane working (herdr #3090).
+
+@Test func claudeBackgroundMcpTaskIsWorking() throws {
+    let claude = try #require(Manifests.get("claude"))
+    // Screen from herdr issue #3090, captured while the task was still alive.
+    let screen = """
+          Thought for 13s, called codex (ctrl+o to expand)
+
+        ● Review started.
+
+        ✻ Baked for 4m 9s · 1 MCP task still running
+
+        ────────────────────────────
+        ❯
+        ────────────────────────────
+          ⏵⏵ bypass permissions on · 1 MCP task · ← for agents
+        """
+    let detection = evaluate(manifest: claude, input: screenInput(screen))
+    #expect(detection.state == .working)
+    #expect(detection.ruleID == "background_mcp_task_working")
+    #expect(detection.visible)
+}
+
+@Test func claudeBackgroundMcpTaskWrappedSummaryIsWorking() throws {
+    let claude = try #require(Manifests.get("claude"))
+    // Narrow panes wrap the summary; continuations are indented.
+    let screen = """
+        ✻ Baked for 4m 9s ·
+          3 MCP tasks still running
+
+        ────────────────────────────
+        ❯
+        ────────────────────────────
+        """
+    let detection = evaluate(manifest: claude, input: screenInput(screen))
+    #expect(detection.state == .working)
+    #expect(detection.ruleID == "background_mcp_task_working")
+}
+
+@Test func claudeFinishedMcpTasksStayIdle() throws {
+    let claude = try #require(Manifests.get("claude"))
+    // Zero-count summaries and prompt text quoting the summary are not
+    // activity: the pane is idle at its prompt box.
+    for line in [
+        "✻ Baked for 4m 9s · 0 MCP tasks still running",
+        "❯ ✻ Baked for 4m 9s · 1 MCP task still running",
+    ] {
+        let screen = """
+            \(line)
+
+            ────────────────────────────
+            ❯
+            ────────────────────────────
+            """
+        let detection = evaluate(manifest: claude, input: screenInput(screen))
+        #expect(detection.state == .idle, "line: \(line)")
+        #expect(detection.ruleID == "live_prompt_box", "line: \(line)")
+    }
+}
+
+@Test func claudeMcpTaskSummaryYieldsToPermissionPrompt() throws {
+    let claude = try #require(Manifests.get("claude"))
+    let screen = """
+        ✻ Baked for 4m 9s · 1 MCP task still running
+
+        Do you want to proceed?
+        ❯ 1. Yes
+          2. No
+
+        Esc to cancel
+        """
+    let detection = evaluate(manifest: claude, input: screenInput(screen))
+    #expect(detection.state == .blocked)
+}
