@@ -186,10 +186,19 @@ nonisolated enum AgentIdentifier {
     }
 
     private static func agentNameFromKnownPackagePath(_ path: String) -> String? {
-        let components = path.split { $0 == "/" || $0 == "\\" }
-            .map { normalizedAgentLookupName(String($0)) }
+        let rawComponents = path.split { $0 == "/" || $0 == "\\" }
+            .map { $0.lowercased() }
+        let piPackage = ["node_modules", "@earendil-works", "pi-coding-agent", "dist"]
+        // Match only the actual entrypoints, not cli.exe or descendants of cli.js.
+        if rawComponents.suffix(piPackage.count + 1).elementsEqual(piPackage + ["cli.js"])
+            || rawComponents.suffix(piPackage.count + 2).elementsEqual(
+                piPackage + ["bundle", "cli.js"])
+        {
+            return Agent.pi.label
+        }
+
+        let components = rawComponents.map(normalizedAgentLookupName)
         let needles: [(needle: [String], agent: Agent)] = [
-            (["node_modules", "@earendil-works", "pi-coding-agent", "dist", "cli"], .pi),
             (["node_modules", "@qwen-code", "qwen-code", "dist", "index"], .qwen),
         ]
 

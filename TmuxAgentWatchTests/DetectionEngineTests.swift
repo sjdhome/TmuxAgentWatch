@@ -276,7 +276,8 @@ private let priorityManifest = #"""
 
 @Test func allBundledManifestsParseAndCompile() {
     let bundled = Manifests.loadBundled()
-    #expect(bundled.count == 20)
+    #expect(bundled.count == 21)
+    #expect(Set(bundled.map(\.id)) == Set(Agent.allCases.compactMap(\.manifestID)))
     for manifest in bundled {
         let agent = Agent.parse(label: manifest.id)
         #expect(agent != nil, "manifest id \(manifest.id) is not a known agent")
@@ -284,7 +285,7 @@ private let priorityManifest = #"""
             agent?.manifestID == manifest.id,
             "manifest \(manifest.id): id must be the agent's canonical label")
     }
-    #expect(Manifests.compiled.count == 20)
+    #expect(Manifests.compiled.count == 21)
 }
 
 @Test func everyUsedRegionIsImplemented() {

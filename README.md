@@ -122,7 +122,10 @@ only) so the icon still reads at Dock-menu sizes.
 ## Refreshing detection manifests
 
 The manifests are converted straight from a sibling checkout of
-[herdr](https://github.com/ogulcancelik/herdr) (Apache-2.0; see NOTICE):
+[herdr](https://github.com/ogulcancelik/herdr) (Apache-2.0; see NOTICE).
+Use `src/detect/manifests`, the built-in rules paired with the source engine;
+`distribution/agent-detection` is a separate publication set and may lag behind.
+Verify the checkout revision before regenerating; conversion does not fetch upstream:
 
 ```sh
 python3 scripts/convert-manifests.py            # reads ../herdr/src/detect/manifests
@@ -136,6 +139,43 @@ engine does not implement, port it in `Detect/DetectionEngine.swift`
 `regionIsSupported`. New agents also need a case in `Detect/Agent.swift`
 and any identification quirks ported into `Detect/AgentIdentifier.swift`
 from herdr's `src/detect/mod.rs`.
+
+### Upstream sync baseline
+
+Synced on **2026-09-07 (Asia/Shanghai)** to Herdr
+[`4b5e9bda239a0b6903889062d756424578e94691`](https://github.com/ogulcancelik/herdr/commit/4b5e9bda239a0b6903889062d756424578e94691),
+from `6e8b138d`, to incorporate upstream recognition fixes:
+
+- 23 recognized agents, 21 bundled manifests: adds Muse aliases and versioned
+  launchers, live state/approval controls, and state-preserving menu overlays.
+- Agent labels accept path-qualified executables. Pi recognizes both
+  `dist/cli.js` and `dist/bundle/cli.js` under its package, rejecting similarly
+  named non-entrypoint files and nested paths.
+- Claude recognizes MCP elicitation and Bash approvals at every cursor position.
+  A background shell alone no longer implies working; live foreground work,
+  background agents, and background MCP tasks still do.
+- Codex recognizes the startup update chooser. Weak blocker phrases are ignored
+  while a current composer is visible, including wrapped prompt text and quoted
+  transcript text. The `whole_recent_without_current_prompt_marker` region
+  returns **empty content**, not just content minus the prompt line; a subsequent
+  response block makes that prompt historical and restores whole-screen matching.
+- Copilot recognizes its waiting-for-background-agents status line.
+
+No settings migration is needed. The manifest engine remains version 3;
+macOS process inspection, the 2-second polling/debounce policy, and the local
+Pi `ask_user` blocker precedence are unchanged. Only the newly referenced
+Codex region was added; the region coverage test remains the gate for future
+manifest changes, not a claim that every unused upstream region is implemented.
+
+Validation: the documented Xcode unit-test command passed on Xcode 26.6
+(macOS 26.6.2): 102 tests, 155 runs including parameterized cases, no failures.
+`UpstreamDetectionTests.swift` covers new screen behavior and negative cases;
+`AgentIdentifierTests.swift` covers launcher paths and false positives.
+Existing actor-isolation and Info.plist build warnings remain outside this sync.
+If `xcode-select` points at Command Line Tools, prefix the build/test commands
+with `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer` rather than
+changing the system-wide selection. Hosted unit tests may briefly run the
+app's normal read-only tmux scan; they do not validate live agent UI versions.
 
 ## Rejected features
 

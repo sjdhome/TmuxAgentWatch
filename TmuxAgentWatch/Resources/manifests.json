@@ -216,16 +216,6 @@
     ]
    },
    {
-    "id": "background_shell_working",
-    "state": "working",
-    "priority": 965,
-    "region": "bottom_non_empty_lines(5)",
-    "visible_working": true,
-    "line_regex": [
-     "^\\s*[⏸⏵].*·\\s+[1-9]\\d*\\s+shells?\\s+(?:·|$)"
-    ]
-   },
-   {
     "id": "background_agents_working",
     "state": "working",
     "priority": 965,
@@ -389,6 +379,35 @@
     ]
    },
    {
+    "id": "mcp_elicitation_prompt",
+    "state": "blocked",
+    "priority": 980,
+    "region": "whole_recent",
+    "visible_blocker": true,
+    "contains": [
+     "esc to cancel"
+    ],
+    "line_regex": [
+     "(?i)^\\s*MCP server [\"\\x{201C}].+[\"\\x{201D}] requests your input\\s*$"
+    ],
+    "all": [
+     {
+      "any": [
+       {
+        "line_regex": [
+         "^\\s*\\x{276F}?\\s*Accept\\b"
+        ]
+       },
+       {
+        "line_regex": [
+         "^\\s*\\x{276F}?\\s*Decline\\b"
+        ]
+       }
+      ]
+     }
+    ]
+   },
+   {
     "id": "live_prompt_box",
     "state": "idle",
     "priority": 950,
@@ -468,12 +487,22 @@
        },
        {
         "line_regex": [
-         "(?i)^\\s*1\\.\\s*yes\\b"
+         "(?i)^\\s*❯?\\s*1\\.\\s*yes\\b"
         ]
        },
        {
         "line_regex": [
-         "(?i)^\\s*2\\.\\s*no\\b"
+         "(?i)^\\s*❯?\\s*2\\.\\s*yes\\b"
+        ]
+       },
+       {
+        "line_regex": [
+         "(?i)^\\s*❯?\\s*2\\.\\s*no\\b"
+        ]
+       },
+       {
+        "line_regex": [
+         "(?i)^\\s*❯?\\s*3\\.\\s*no\\b"
         ]
        }
       ]
@@ -777,6 +806,21 @@
     ]
    },
    {
+    "id": "startup_update",
+    "state": "blocked",
+    "priority": 950,
+    "region": "bottom_non_empty_lines(20)",
+    "visible_blocker": true,
+    "contains": [
+     "Update available!",
+     "Update now"
+    ],
+    "regex": [
+     "Skip\\s+until\\s+next\\s+version",
+     "Press enter to continue\\s*\\z"
+    ]
+   },
+   {
     "id": "live_strong_blocker",
     "state": "blocked",
     "priority": 900,
@@ -809,7 +853,7 @@
     "id": "weak_blocker",
     "state": "blocked",
     "priority": 600,
-    "region": "whole_recent",
+    "region": "whole_recent_without_current_prompt_marker",
     "any": [
      {
       "contains": [
@@ -1375,6 +1419,16 @@
        }
       ]
      }
+    ]
+   },
+   {
+    "id": "background_agents_working",
+    "state": "working",
+    "priority": 110,
+    "region": "bottom_non_empty_lines(6)",
+    "visible_working": true,
+    "line_regex": [
+     "^\\s*◎\\s+Waiting for background agents(?:\\s|·|$)"
     ]
    },
    {
@@ -2337,6 +2391,208 @@
      {
       "line_regex": [
        "^( [\\x{2800}-\\x{28FF}]){1,2} "
+      ]
+     }
+    ]
+   }
+  ]
+ },
+ {
+  "id": "muse",
+  "min_engine_version": 2,
+  "rules": [
+   {
+    "id": "workspace_trust_blocked",
+    "state": "blocked",
+    "priority": 970,
+    "region": "bottom_non_empty_lines(12)",
+    "visible_blocker": true,
+    "contains": [
+     "Do you trust this workspace?"
+    ],
+    "any": [
+     {
+      "contains": [
+       "Trust and continue"
+      ]
+     },
+     {
+      "contains": [
+       "Use Up/Down"
+      ]
+     }
+    ]
+   },
+   {
+    "id": "pick_request_blocked",
+    "state": "blocked",
+    "priority": 950,
+    "region": "bottom_non_empty_lines(8)",
+    "visible_blocker": true,
+    "any": [
+     {
+      "contains": [
+       "Enter to select",
+       "Tab for an optional note"
+      ]
+     },
+     {
+      "contains": [
+       "Enter to toggle",
+       "Esc to interrupt"
+      ]
+     }
+    ]
+   },
+   {
+    "id": "menu_overlay",
+    "state": "unknown",
+    "priority": 940,
+    "region": "bottom_non_empty_lines(8)",
+    "skip_state_update": true,
+    "any": [
+     {
+      "contains": [
+       "enter confirm",
+       "esc go back"
+      ]
+     },
+     {
+      "contains": [
+       "enter save",
+       "esc go back"
+      ]
+     },
+     {
+      "contains": [
+       "space toggle",
+       "esc close",
+       "type filter"
+      ]
+     }
+    ]
+   },
+   {
+    "id": "working_esc_interrupt",
+    "state": "working",
+    "priority": 900,
+    "region": "bottom_non_empty_lines(8)",
+    "visible_working": true,
+    "contains": [
+     "esc to interrupt"
+    ],
+    "not": [
+     {
+      "contains": [
+       "Enter to select",
+       "Tab for an optional note"
+      ]
+     },
+     {
+      "contains": [
+       "Enter to toggle",
+       "Esc to interrupt"
+      ]
+     }
+    ]
+   },
+   {
+    "id": "blocked_approval",
+    "state": "blocked",
+    "priority": 850,
+    "region": "bottom_non_empty_lines(8)",
+    "visible_blocker": true,
+    "any": [
+     {
+      "contains": [
+       "Allow this stage once",
+       "Always allow in this workspace"
+      ]
+     },
+     {
+      "contains": [
+       "Allow once",
+       "Allow for this session"
+      ]
+     },
+     {
+      "contains": [
+       "Yes, proceed",
+       "Yes, don't ask again this session"
+      ]
+     }
+    ]
+   },
+   {
+    "id": "idle_prompt",
+    "state": "idle",
+    "priority": 700,
+    "region": "bottom_non_empty_lines(5)",
+    "visible_idle": true,
+    "any": [
+     {
+      "line_regex": [
+       "^\\s*⟩\\s*$"
+      ]
+     },
+     {
+      "line_regex": [
+       "^\\s*⟩\\s+\\S"
+      ]
+     }
+    ],
+    "not": [
+     {
+      "contains": [
+       "esc to interrupt"
+      ]
+     },
+     {
+      "contains": [
+       "Enter to select",
+       "Tab for an optional note"
+      ]
+     },
+     {
+      "contains": [
+       "Enter to toggle",
+       "Esc to interrupt"
+      ]
+     },
+     {
+      "contains": [
+       "enter confirm",
+       "esc go back"
+      ]
+     },
+     {
+      "contains": [
+       "enter save",
+       "esc go back"
+      ]
+     },
+     {
+      "contains": [
+       "space toggle",
+       "esc close",
+       "type filter"
+      ]
+     }
+    ]
+   },
+   {
+    "id": "idle_status_fallback",
+    "state": "idle",
+    "priority": 500,
+    "region": "bottom_non_empty_lines(3)",
+    "visible_idle": true,
+    "line_regex": [
+     "^\\s*\\S+ · (none|minimal|low|medium|high|xhigh|ultra) · "
+    ],
+    "not": [
+     {
+      "contains": [
+       "esc to interrupt"
       ]
      }
     ]

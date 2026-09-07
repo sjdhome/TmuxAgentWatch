@@ -151,6 +151,65 @@ private func foregroundProcess(_ pid: UInt32, _ name: String, _ argv: [String])
     #expect(Agent.mastracode.manifestID == nil)
 }
 
+// MARK: - Herdr 4b5e9bda identification regressions
+
+@Test(arguments: [
+    "muse", "muse-code", "muse-cli", "muse-bin-0.1.0-R708.1", "muse-bin-1.2.3",
+    "/home/user/.local/bin/muse-bin-0.2.1-R1215.1",
+    #"C:\Users\user\muse-bin-0.2.1-R1215.1.exe"#,
+])
+func museLaunchersAreDetected(_ label: String) {
+    #expect(Agent.parse(label: label) == .muse)
+    let process = ForegroundProcess(
+        pid: 123, name: "muse-bin-0.2.1", argv0: label, argv: [label], cmdline: label)
+    let job = ForegroundJob(processGroupID: 123, processes: [process])
+    #expect(AgentIdentifier.identifyAgent(in: job)?.0 == .muse)
+}
+
+@Test(arguments: [
+    "museum", "muse-helper", "muser", "musescore", "muse-bin", "muse-bin-",
+    "muse-binary", "muse-bin-preview", "muse-bin-１.0",
+])
+func unrelatedMuseNamesAreIgnored(_ label: String) {
+    #expect(Agent.parse(label: label) == nil)
+}
+
+@Test func pathQualifiedAgentLabelsAreDetected() {
+    #expect(Agent.parse(label: "/usr/local/bin/claude") == .claude)
+    #expect(Agent.parse(label: #"C:\tools\CODEX.EXE"#) == .codex)
+    #expect(Agent.parse(label: "/tmp/claude/helper") == nil)
+}
+
+@Test(arguments: [
+    "/usr/local/lib/node_modules/@earendil-works/pi-coding-agent/dist/bundle/cli.js",
+    #"C:\Users\user\pi-node\current/node_modules/@earendil-works/pi-coding-agent/dist/bundle/cli.js"#,
+    "/opt/NODE_MODULES/@EARENDIL-WORKS/PI-CODING-AGENT/DIST/BUNDLE/CLI.JS",
+])
+func piBundledEntrypointIsDetected(_ script: String) {
+    let job = ForegroundJob(
+        processGroupID: 123,
+        processes: [foregroundProcess(123, "node", ["/usr/local/bin/node", script])])
+    let found = AgentIdentifier.identifyAgent(in: job)
+    #expect(found?.0 == .pi)
+    #expect(found?.1 == "pi")
+}
+
+@Test(arguments: [
+    "/tmp/node_modules/@earendil-works/pi-coding-agent/scripts/build.js",
+    "/tmp/node_modules/@earendil-works/pi-coding-agent/dist/bundle/update.js",
+    "/tmp/dist/bundle/cli.js",
+    "/tmp/node_modules/other-package/dist/bundle/cli.js",
+    "/tmp/node_modules/@earendil-works/pi-coding-agent/dist/cli.exe",
+    "/tmp/node_modules/@earendil-works/pi-coding-agent/dist/cli.js/other.js",
+    "/tmp/node_modules/@earendil-works/pi-coding-agent/dist/bundle/cli.exe",
+    "/tmp/node_modules/@earendil-works/pi-coding-agent/dist/bundle/cli.js/other.js",
+])
+func nonEntrypointPiPathsAreIgnored(_ script: String) {
+    let job = ForegroundJob(
+        processGroupID: 123, processes: [foregroundProcess(123, "node", ["node", script])])
+    #expect(AgentIdentifier.identifyAgent(in: job) == nil)
+}
+
 // MARK: - KERN_PROCARGS2 parsing
 
 private func procargs2Buffer(_ argc: Int32, _ execPath: String, _ strings: [String]) -> [UInt8] {

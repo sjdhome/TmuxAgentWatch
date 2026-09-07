@@ -32,6 +32,7 @@ nonisolated enum Agent: String, CaseIterable, Sendable {
     case qodercli
     case qwen
     case maki
+    case muse
 
     /// Canonical label, matching the manifest `id` fields.
     var label: String { rawValue }
@@ -50,6 +51,7 @@ nonisolated enum Agent: String, CaseIterable, Sendable {
     }
 
     private static func lookup(_ name: String) -> Agent? {
+        let name = name.split { $0 == "/" || $0 == "\\" }.last.map(String.init) ?? name
         switch name {
         case "pi": return .pi
         case "claude", "claude-code": return .claude
@@ -73,7 +75,16 @@ nonisolated enum Agent: String, CaseIterable, Sendable {
         case "qodercli", "qoderclicn", "qoder", "qodercn": return .qodercli
         case "qwen", "qwen-code", "qwen code": return .qwen
         case "maki": return .maki
-        default: return nil
+        case "muse", "muse-code", "muse-cli": return .muse
+        default:
+            // Muse's launcher execs muse-bin-<version>, not a bare alias.
+            if name.hasPrefix("muse-bin-"),
+                let first = name.dropFirst("muse-bin-".count).first,
+                first.isASCII && first.isNumber
+            {
+                return .muse
+            }
+            return nil
         }
     }
 }
