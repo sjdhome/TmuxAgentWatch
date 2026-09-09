@@ -88,10 +88,12 @@ for the full design rationale):
    foreground process group of the pane's terminal is resolved via
    `proc_pidinfo`/`proc_listpids`, unwrapping runtime wrappers (`node`,
    `python`, shells) and nested-PTY wrapper shells to find the agent process.
-2. **Native blockers** (`Detect/PiAskUser.swift`) — Pi panes are checked for
-   the active `ask_user` extension UI, which takes precedence as **blocked**.
-3. **Screen detection** (`Detect/DetectionEngine.swift`) — for agent panes
-   without a native blocker, `capture-pane -p` plus `#{pane_title}` are
+2. **Native Pi observations** (`Detect/PiAskUser.swift`, `Detect/PiWorking.swift`)
+   — the active `ask_user` extension UI takes precedence as **blocked**;
+   otherwise a built-in spinner in the current editor border means **working**.
+   Pi falls back to **idle**, never to the legacy full-screen literal rule.
+3. **Screen detection** (`Detect/DetectionEngine.swift`) — for other agent panes,
+   `capture-pane -p` plus `#{pane_title}` are
    matched against per-agent rule manifests (regions, AND/OR/NOT gates,
    priority winner selection) bundled as `Resources/manifests.json`.
 4. **Debounce** (`Detect/StateStore.swift`) — Working→Idle needs two
@@ -176,6 +178,51 @@ If `xcode-select` points at Command Line Tools, prefix the build/test commands
 with `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer` rather than
 changing the system-wide selection. Hosted unit tests may briefly run the
 app's normal read-only tmux scan; they do not validate live agent UI versions.
+
+### Native Pi editor-status compatibility
+
+Added on **2026-09-09 (Asia/Shanghai)** after a live pane showed
+`── ⠧ Working ──…`, which the unchanged Herdr Pi rule (`Working...`) misses.
+The reference is Pi
+[`6160683a`](https://github.com/earendil-works/pi/commit/6160683a4a8012f0d1cd30c145df18b4ca6f5176):
+`packages/coding-agent/src/modes/interactive/components/custom-editor.ts`,
+`status-indicator.ts` in the same directory, and
+`packages/tui/src/components/loader.ts`.
+
+`PiWorking` recognizes the default spinner frames in the last pair of
+left-aligned editor-like borders, with an input row between them. It supports
+truncated labels, narrow spinner-only borders, and full scroll-count labels.
+Compaction, branch summaries, and retries share this active-status structure
+and also count as working. Matching is not limited to the bottom few lines:
+below-editor task widgets may be tall. Plain `Working` text, indented quotes,
+and historical status above a newer idle editor do not trigger this addition.
+On the same date, Pi support was explicitly limited to this modern layout:
+the initial legacy fallback also matched `Working...` in ordinary transcript,
+draft, and widget text. Pi now returns idle when neither its native blocker
+nor active editor border is visible. Its bundled Herdr manifest is retained
+unchanged for source parity but is **not evaluated by the scanner**. Old Pi
+standalone loading rows are intentionally no longer supported. `ask_user`
+still wins, and the polling and debounce policies are unchanged. No settings
+migration is needed.
+
+This is a screen heuristic, not Pi runtime integration: arbitrary custom
+spinner frames/editors, one-column panes, truncated bottom scroll labels,
+and widgets adding their own left-aligned borders below the editor are not
+covered. An exact imitation of editor chrome in output can still be ambiguous.
+Keep the shim outside generated manifests so regeneration cannot erase it;
+recheck it when Pi changes the referenced renderers. Re-enable upstream Pi
+rules and remove the shim only when they cover the active-status and negative
+transcript/draft/widget cases through this engine; do not restore the old
+full-screen literal fallback.
+
+Validation: the new tests reproduced the idle fallback before the fix; the
+standard Xcode unit-test command then passed on Xcode 26.6/macOS 26.6.2:
+117 tests, 207 runs including parameterized cases, no failures.
+`PiWorkingTests.swift` uses synthetic chrome only and covers all default
+spinner frames, narrow/scrolling layouts, tall widgets, negative cases,
+rejection of legacy literals in transcript/drafts/widgets, blocker precedence,
+and return-to-idle debounce even while old status text remains visible. Existing
+actor-isolation, Info.plist, and AppIntents metadata warnings remain unchanged.
 
 ## Rejected features
 

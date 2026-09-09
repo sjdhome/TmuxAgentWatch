@@ -106,6 +106,15 @@ nonisolated enum Scanner {
         if let detection = nativeBlocker(agent: agent, screen: screen) {
             return detection
         }
+        if agent == .pi {
+            if PiWorking.isWorking(screen: screen) {
+                return Detection(
+                    state: .working, ruleID: "pi_status_border", skip: false, visible: true)
+            }
+            // Only modern Pi editor chrome is supported. The upstream legacy
+            // literal matches transcript, draft, and widget text as well as work.
+            return .knownAgentIdleFallback
+        }
 
         let input = DetectionInput(
             screen: screen,
