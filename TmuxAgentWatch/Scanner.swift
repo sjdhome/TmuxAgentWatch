@@ -107,13 +107,9 @@ nonisolated enum Scanner {
             return detection
         }
         if agent == .pi {
-            if PiWorking.isWorking(screen: screen) {
-                return Detection(
-                    state: .working, ruleID: "pi_status_border", skip: false, visible: true)
-            }
-            // Only modern Pi editor chrome is supported. The upstream legacy
+            // Only explicit Pi status chrome is supported. The upstream legacy
             // literal matches transcript, draft, and widget text as well as work.
-            return .knownAgentIdleFallback
+            return PiWorking.detect(screen: screen) ?? .knownAgentIdleFallback
         }
 
         let input = DetectionInput(

@@ -129,7 +129,7 @@ import Testing
         let screen = editor(
             "── ⠧ Working ─────────────────────────────────────────────────────────────",
             body: "Question\n Enter submit • Tab/Shift+Tab navigate • Esc cancel")
-        #expect(PiWorking.isWorking(screen: screen))
+        #expect(PiWorking.detect(screen: screen)?.state == .working)
         let result = detect(screen)
         #expect(result.state == .blocked)
         #expect(result.ruleID == "pi_ask_user_waiting")

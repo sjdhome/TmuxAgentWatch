@@ -90,8 +90,9 @@ for the full design rationale):
    `python`, shells) and nested-PTY wrapper shells to find the agent process.
 2. **Native Pi observations** (`Detect/PiAskUser.swift`, `Detect/PiWorking.swift`)
    — the active `ask_user` extension UI takes precedence as **blocked**;
-   otherwise a built-in spinner in the current editor border means **working**.
-   Pi falls back to **idle**, never to the legacy full-screen literal rule.
+   otherwise a built-in spinner in the current editor border or the standalone
+   compaction loader immediately above it means **working**. Pi falls back to
+   **idle**, never to the legacy full-screen literal rule.
 3. **Screen detection** (`Detect/DetectionEngine.swift`) — for other agent panes,
    `capture-pane -p` plus `#{pane_title}` are
    matched against per-agent rule manifests (regions, AND/OR/NOT gates,
@@ -196,14 +197,23 @@ Compaction, branch summaries, and retries share this active-status structure
 and also count as working. Matching is not limited to the bottom few lines:
 below-editor task widgets may be tall. Plain `Working` text, indented quotes,
 and historical status above a newer idle editor do not trigger this addition.
-On the same date, Pi support was explicitly limited to this modern layout:
-the initial legacy fallback also matched `Working...` in ordinary transcript,
-draft, and widget text. Pi now returns idle when neither its native blocker
-nor active editor border is visible. Its bundled Herdr manifest is retained
-unchanged for source parity but is **not evaluated by the scanner**. Old Pi
-standalone loading rows are intentionally no longer supported. `ask_user`
-still wins, and the polling and debounce policies are unchanged. No settings
-migration is needed.
+Pi support is explicitly limited to structural status evidence: the initial
+legacy fallback also matched `Working...` in ordinary transcript, draft, and
+widget text. Pi returns idle when neither its native blocker nor a supported
+active status is visible. Its bundled Herdr manifest is retained unchanged
+for source parity but is **not evaluated by the scanner**. Old standalone
+`Working...` rows remain unsupported. `ask_user` still wins, and the polling
+and debounce policies are unchanged. No settings migration is needed.
+
+A screenshot-reported standalone compaction layout was added on the same date
+as a narrow exception, not a return to full-screen text matching. The last
+non-empty line before the current plain editor must be exactly a default
+spinner followed by `Compacting context... (esc to cancel)` or the `escape`
+variant, with the loader's one-space left padding. Only blank rows may separate
+it from the editor. The result is `pi_compaction_status`; border-embedded
+activity remains `pi_status_border`. The remote Codex notification alone does
+not count as activity. Wrapped/truncated loaders or widgets inserted between
+the loader and editor are not covered.
 
 This is a screen heuristic, not Pi runtime integration: arbitrary custom
 spinner frames/editors, one-column panes, truncated bottom scroll labels,
@@ -217,12 +227,13 @@ full-screen literal fallback.
 
 Validation: the new tests reproduced the idle fallback before the fix; the
 standard Xcode unit-test command then passed on Xcode 26.6/macOS 26.6.2:
-117 tests, 207 runs including parameterized cases, no failures.
-`PiWorkingTests.swift` uses synthetic chrome only and covers all default
-spinner frames, narrow/scrolling layouts, tall widgets, negative cases,
-rejection of legacy literals in transcript/drafts/widgets, blocker precedence,
-and return-to-idle debounce even while old status text remains visible. Existing
-actor-isolation, Info.plist, and AppIntents metadata warnings remain unchanged.
+126 tests, 243 runs including parameterized cases, no failures.
+`PiWorkingTests.swift` and `PiCompactionTests.swift` use synthetic chrome only
+and cover all default spinner frames, narrow/scrolling layouts, tall widgets,
+standalone compaction with both cancel hints, rejection of transcript/draft/
+widget text and legacy literals, blocker precedence, and return-to-idle
+behavior. Existing actor-isolation, Info.plist, and AppIntents metadata
+warnings remain unchanged.
 
 ## Rejected features
 
