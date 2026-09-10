@@ -1,10 +1,19 @@
-# Xcode user state
+# Xcode user state and local source-control metadata
+# Keep xcshareddata/ and shared schemes available for version control.
 xcuserdata/
 *.xcuserstate
+*.xccheckout
+*.xcscmblueprint
+*.moved-aside
 
-# Build products
+# Build products, debug symbols, and test results
 build/
 DerivedData/
+*.hmap
+*.ipa
+*.dSYM
+*.dSYM.zip
+*.xcresult
 
 # Swift Package Manager
 .swiftpm/
