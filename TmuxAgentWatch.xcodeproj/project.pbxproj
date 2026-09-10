@@ -29,9 +29,22 @@
 		45E226C930369E36000C3918 /* TmuxAgentWatchUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = TmuxAgentWatchUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
+/* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
+		CA8B5A760AB347DFA134506E /* Exceptions for "TmuxAgentWatch" folder in "TmuxAgentWatch" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Info.plist,
+			);
+			target = 45E226AF30369E35000C3918 /* TmuxAgentWatch */;
+		};
+/* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
+
 /* Begin PBXFileSystemSynchronizedRootGroup section */
 		45E226B230369E35000C3918 /* TmuxAgentWatch */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				CA8B5A760AB347DFA134506E /* Exceptions for "TmuxAgentWatch" folder in "TmuxAgentWatch" target */,
+			);
 			path = TmuxAgentWatch;
 			sourceTree = "<group>";
 		};

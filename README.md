@@ -78,6 +78,22 @@ The app target has App Sandbox **disabled**: it must spawn the `tmux` binary
 and inspect other processes of the same user via `libproc`, neither of which
 a sandboxed app can do.
 
+### Build warning cleanup
+
+On **2026-09-10 (Asia/Shanghai)**, the Pi blocker rule ID was moved into
+`Scanner` as a private static constant so it shares the scanner's
+`nonisolated` context rather than inheriting the project's default
+`MainActor` isolation. `Info.plist` was also excluded from synchronized
+folder target membership: `INFOPLIST_FILE` still supplies the processed
+bundle metadata, without copying the source plist as an ordinary resource.
+Neither change alters detection behavior or requires a settings migration.
+
+Validation: the documented unit-test command passed (126 tests, 243 runs
+including parameterized cases, no failures), and a fresh Release build
+succeeded. The actor-isolation and resource-copy warnings are resolved.
+The harmless AppIntents metadata-extraction warning remains intentionally:
+the app does not use AppIntents, so no unused framework dependency was added.
+
 ## How it works
 
 The pipeline is a faithful port of the Rust implementation (see its README

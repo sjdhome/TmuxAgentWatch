@@ -8,8 +8,6 @@
 
 import Foundation
 
-private let piAskUserRuleID = "pi_ask_user_waiting"
-
 /// A pane with a detected agent, carrying the debounced detection.
 nonisolated struct AgentPane: Sendable, Identifiable {
     var info: PaneInfo
@@ -68,6 +66,8 @@ nonisolated struct StateCounts: Sendable, Equatable {
 }
 
 nonisolated enum Scanner {
+    private static let piAskUserRuleID = "pi_ask_user_waiting"
+
     /// Run one scan with debounced states folded through the store.
     static func scanDebounced(store: StateStore) -> Snapshot {
         let panes: [PaneInfo]
