@@ -305,6 +305,7 @@ nonisolated func regionText(input: DetectionInput, spec: String) -> String {
     switch trimmed {
     case "whole_recent": return content
     case "after_last_prompt_marker": return afterLastPromptMarker(content)
+    case "before_current_prompt_marker": return beforeCurrentPromptMarker(content)
     case "whole_recent_without_current_prompt_marker":
         return wholeRecentWithoutCurrentPromptMarker(content)
     case "prompt_box_body": return promptBoxBody(content) ?? ""
@@ -332,7 +333,7 @@ nonisolated func regionIsSupported(_ spec: String) -> Bool {
     let trimmed = spec.trimmingCharacters(in: .whitespaces)
     switch trimmed {
     case "osc_title", "osc_progress", "whole_recent", "after_last_prompt_marker",
-        "whole_recent_without_current_prompt_marker",
+        "before_current_prompt_marker", "whole_recent_without_current_prompt_marker",
         "prompt_box_body", "above_prompt_box", "last_non_empty_above_prompt_box",
         "after_last_horizontal_rule":
         return true
@@ -395,17 +396,31 @@ nonisolated private func afterLastPromptMarker(_ content: String) -> String {
     return sliceFromLine(content, lines, index + 1)
 }
 
+nonisolated private func codexBlockMarkerLine(_ line: Substring) -> Bool {
+    line.hasPrefix("•") || line.hasPrefix("■") || line.hasPrefix("✗") || line.hasPrefix("✓")
+}
+
+/// Index of the last prompt line, unless a later response block makes that
+/// prompt historical.
+nonisolated private func currentCodexPromptIndex(_ lines: [Substring]) -> Int? {
+    guard let promptIndex = lines.lastIndex(where: codexPromptLine) else { return nil }
+    if lines.dropFirst(promptIndex + 1).contains(where: codexBlockMarkerLine) { return nil }
+    return promptIndex
+}
+
+/// Everything above Codex's current composer; whole content when there is
+/// no current prompt.
+nonisolated private func beforeCurrentPromptMarker(_ content: String) -> String {
+    let lines = rustLines(content)
+    guard let promptIndex = currentCodexPromptIndex(lines) else { return content }
+    return String(content[..<lineStart(content, lines, promptIndex)])
+}
+
 /// Suppress weak blocker text when Codex has a current composer. This is
 /// intentionally all-or-nothing, not a slice removing just the prompt line.
 /// A later response block means the prompt was historical instead.
 nonisolated private func wholeRecentWithoutCurrentPromptMarker(_ content: String) -> String {
-    let lines = rustLines(content)
-    guard let promptIndex = lines.lastIndex(where: codexPromptLine) else { return content }
-    let hasLaterBlock = lines.dropFirst(promptIndex + 1).contains { line in
-        line.hasPrefix("•") || line.hasPrefix("■")
-            || line.hasPrefix("✗") || line.hasPrefix("✓")
-    }
-    return hasLaterBlock ? content : ""
+    currentCodexPromptIndex(rustLines(content)) == nil ? content : ""
 }
 
 nonisolated private func afterLastHorizontalRule(_ content: String) -> String {

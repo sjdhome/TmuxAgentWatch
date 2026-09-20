@@ -210,6 +210,115 @@ func nonEntrypointPiPathsAreIgnored(_ script: String) {
     #expect(AgentIdentifier.identifyAgent(in: job) == nil)
 }
 
+// MARK: - Herdr d59d0603 identification regressions
+
+@Test(arguments: [
+    (".cline", "/home/user/.npm/lib/node_modules/cline/bin/.cline"),
+    ("cline", "/usr/local/lib/node_modules/@cline/cli-darwin-arm64/bin/cline"),
+])
+func clineNativeBinariesAreDetected(_ name: String, _ executable: String) {
+    let job = ForegroundJob(
+        processGroupID: 123, processes: [foregroundProcess(123, name, [executable, "--tui"])])
+    let found = AgentIdentifier.identifyAgent(in: job)
+    #expect(found?.0 == .cline)
+    #expect(found?.1 == name)
+}
+
+@Test(arguments: [
+    ("MainThread", ["node", "/home/user/.fnm/bin/cline", "--tui"]),
+    ("node", ["node", "/usr/local/lib/node_modules/cline/bin/cline"]),
+])
+func clineNodeWrapperIsDetected(_ name: String, _ argv: [String]) {
+    let job = ForegroundJob(processGroupID: 123, processes: [foregroundProcess(123, name, argv)])
+    let found = AgentIdentifier.identifyAgent(in: job)
+    #expect(found?.0 == .cline)
+    #expect(found?.1 == "cline")
+}
+
+@Test(arguments: [
+    ["node"],
+    ["node", "/path/to/other.js", "cline"],
+    ["node", "-e", "cline"],
+    ["node", "/path/to/cline-helper"],
+    ["/path/to/.cline-helper"],
+    ["/path/to/other", "/path/to/cline"],
+])
+func unrelatedClineMentionsAreIgnored(_ argv: [String]) {
+    let job = ForegroundJob(
+        processGroupID: 123, processes: [foregroundProcess(123, "MainThread", argv)])
+    #expect(AgentIdentifier.identifyAgent(in: job) == nil)
+    #expect(Agent.parse(label: "MainThread") == nil)
+}
+
+@Test func kimiPackageEntrypointIsDetected() {
+    let script = "/usr/local/lib/node_modules/@moonshot-ai/kimi-code/dist/main.mjs"
+    let job = ForegroundJob(
+        processGroupID: 123, processes: [foregroundProcess(123, "node", ["node", script])])
+    let found = AgentIdentifier.identifyAgent(in: job)
+    #expect(found?.0 == .kimi)
+    #expect(found?.1 == "kimi")
+
+    let helper = ForegroundJob(
+        processGroupID: 123,
+        processes: [
+            foregroundProcess(
+                123, "node", ["node", "/tmp/node_modules/@moonshot-ai/kimi-code/dist/worker.mjs"])
+        ])
+    #expect(AgentIdentifier.identifyAgent(in: helper) == nil)
+}
+
+@Test func lettaLabelsAreDetected() {
+    #expect(Agent.parse(label: "letta") == .letta)
+    #expect(Agent.parse(label: "Letta Code") == .letta)
+    #expect(Agent.parse(label: "letta-code") == .letta)
+    #expect(Agent.letta.manifestID == "letta")
+}
+
+@Test(arguments: [
+    ["letta", "--backend", "local"],
+    ["node", "/home/user/project/node_modules/.bin/letta", "--conversation", "conversation-id"],
+    [
+        "node.exe",
+        #"C:\Users\user\AppData\Roaming\npm\node_modules\@letta-ai\letta-code\letta.js"#,
+        "--agent", "agent-id",
+    ],
+])
+func interactiveLettaEntrypointsAreDetected(_ argv: [String]) {
+    let job = ForegroundJob(
+        processGroupID: 123, processes: [foregroundProcess(123, "MainThread", argv)])
+    let found = AgentIdentifier.identifyAgent(in: job)
+    #expect(found?.0 == .letta)
+    #expect(found?.1 == "letta")
+}
+
+@Test(arguments: [
+    ["--prompt", "hello"],
+    ["--output-format", "json"],
+    ["--input-format=stream-json"],
+    ["--ephemeral"],
+    ["--max-turns=1"],
+    ["server"],
+    ["--backend", "local", "server"],
+    ["fix this bug"],
+    ["agents", "list"],
+    ["version"],
+])
+func nonInteractiveLettaProcessesAreIgnored(_ args: [String]) {
+    let argv = ["node", "/home/user/project/node_modules/.bin/letta"] + args
+    let job = ForegroundJob(
+        processGroupID: 123, processes: [foregroundProcess(123, "MainThread", argv)])
+    #expect(AgentIdentifier.identifyAgent(in: job) == nil, "argv: \(argv)")
+}
+
+@Test(arguments: [
+    ["node", "/tmp/server.js", "letta"],
+    ["node", "/home/user/src/letta-code/letta/build.js"],
+])
+func unrelatedLettaMentionsAreIgnored(_ argv: [String]) {
+    let job = ForegroundJob(processGroupID: 123, processes: [foregroundProcess(123, "node", argv)])
+    #expect(AgentIdentifier.identifyAgent(in: job) == nil)
+}
+
 // MARK: - KERN_PROCARGS2 parsing
 
 private func procargs2Buffer(_ argc: Int32, _ execPath: String, _ strings: [String]) -> [UInt8] {

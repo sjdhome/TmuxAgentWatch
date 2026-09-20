@@ -1,4 +1,5 @@
-// Detection regressions ported from Herdr 4b5e9bda (Apache-2.0; see NOTICE).
+// Detection regressions ported from Herdr (Apache-2.0; see NOTICE). Sections
+// up to Muse track 4b5e9bda; the d59d0603 sync follows.
 
 import Foundation
 import Testing
@@ -212,5 +213,207 @@ func museMenusKeepPreviousState(_ screen: String) {
 func museSingleControlPhrasesAreNotBlockers(_ phrase: String) {
     let detection = upstreamDetection(.muse, "\(phrase)\n────\n⟩\n────")
     #expect(detection.state == .idle)
+    #expect(!detection.skip)
+}
+
+// MARK: - Herdr d59d0603: Codex activity above the current composer
+
+private let codexQueuedInputs = [
+    "",
+    "\n• Queued follow-up inputs\n  ↳ Follow up after this turn\n    alt + ↑ edit last queued message\n",
+    "\n• Messages to be submitted after next tool call\n  (press esc to interrupt and send immediately)\n  ↳ Keep waiting until the sleep finishes.\n",
+    "\n• Messages to be submitted after next\n  tool call (press esc to interrupt and\n  send immediately)\n  ↳ Keep waiting until the sleep finishes.\n",
+    "\n• Messages to be submitted at end of turn\n  ↳ Follow up after this turn\n",
+    "\n• Messages to be submitted after next tool call\n  (press esc to interrupt and send immediately)\n  ↳ Keep waiting.\n\n• Queued follow-up inputs\n  ↳ After this turn reply ok.\n    alt + ↑ edit last queued message\n",
+]
+
+@Test(arguments: ["", "• ", "◦ "], ["Working", "Fixing bug in queue region"])
+func codexWorkingFallbackHandlesActivityLabelsAndQueuedInputs(_ prefix: String, _ label: String) {
+    for queue in codexQueuedInputs {
+        let screen =
+            "\(prefix)\(label) (1m 16s • esc to interrupt) · 1 background terminal running · /ps to view · /stop to close\n\(queue)\n› Ask Codex to do anything\n\n  model · /work\n"
+        let detection = upstreamDetection(.codex, screen, title: "project")
+        #expect(detection.state == .working, "\(screen)")
+        #expect(detection.ruleID == "screen_working_fallback", "\(screen)")
+        #expect(detection.visible)
+    }
+}
+
+@Test func codexBeforeCurrentPromptRegionStopsAtTheLiveComposer() {
+    let region = "before_current_prompt_marker"
+    #expect(regionIsSupported(region))
+    func text(_ screen: String) -> String {
+        regionText(
+            input: DetectionInput(screen: screen, oscTitle: "", oscProgress: ""), spec: region)
+    }
+    #expect(text("status\n\n› draft\nfooter") == "status\n\n")
+    #expect(text("› old\nstatus\n› new") == "› old\nstatus\n")
+    #expect(text("› draft") == "")
+    // No prompt, or a prompt made historical by a later response block.
+    #expect(text("status only") == "status only")
+    #expect(text("› old\n• response") == "› old\n• response")
+}
+
+@Test func codexWorkingFallbackUsesLatestActivityAfterInterruption() {
+    let screen =
+        "■ Conversation interrupted\n\n› Try again\n\nWorking (4s • esc to interrupt)\n\n› Ask Codex to do anything\n\n  model · /work\n"
+    let detection = upstreamDetection(.codex, screen, title: "project")
+    #expect(detection.state == .working)
+    #expect(detection.visible)
+}
+
+@Test(arguments: [
+    "Working (1m 16s • esc to interrupt)\n• Finished the task\n› Ask Codex to do anything\n",
+    "Working (1m 16s • esc to interrupt)\n■ Conversation interrupted\n› Ask Codex to do anything\n",
+    "Working (1m 16s • esc to interrupt)\n─ Worked for 1m 16s ─\n› Ask Codex to do anything\n",
+    "Working (1m 16s • esc to interrupt)\n•\nMessages to be submitted after next tool call\n› Ask Codex to do anything\n",
+    "› Explain this status:\n  Working (1m 16s • esc to interrupt)\n",
+    "• Example (press esc to interrupt)\n› Ask Codex to do anything\n",
+])
+func codexStaleOrQuotedActivityIsNotWorking(_ screen: String) {
+    let detection = upstreamDetection(.codex, screen, title: "project")
+    #expect(detection.state == .idle, "\(screen)")
+    #expect(detection.ruleID != "screen_working_fallback")
+}
+
+// MARK: - Herdr d59d0603: Codex composer sparkles
+
+@Test(arguments: ["› ", "›⠁", "›⠂", "›⠄", "›⠈", "›⠐", "›⠠", "›⡀", "›⢀"])
+func codexSparklePromptPreservesLiveStates(_ marker: String) {
+    let screen = "Do you want to proceed? [y/n]\n\(marker)unsent draft\n"
+    #expect(upstreamDetection(.codex, screen, title: "project | Ready").state == .idle)
+
+    let working =
+        "Do you want to proceed? [y/n]\n• Working (4s • esc to interrupt)\n\(marker)draft\n"
+    #expect(upstreamDetection(.codex, working, title: "project").state == .working)
+
+    let approval = upstreamDetection(
+        .codex, screen + "Press enter to confirm or esc to cancel\n", title: "project")
+    #expect(approval.state == .blocked)
+    #expect(approval.visible)
+
+    for response in ["•", "■", "✗", "✓"] {
+        let detection = upstreamDetection(
+            .codex, "\(screen)\(response) Do you want to proceed? [y/n]\n", title: "project")
+        #expect(detection.state == .blocked, "\(marker) \(response)")
+    }
+}
+
+@Test(arguments: ["›text", "›⠋draft", "›⠀draft", " ›⠁draft", "quoted ›⠁draft"])
+func codexWeakBlockerDoesNotIgnoreArbitraryPromptSuffixes(_ line: String) {
+    let detection = upstreamDetection(
+        .codex, "Do you want to proceed? [y/n]\n\(line)\n", title: "project")
+    #expect(detection.state == .blocked, "\(line)")
+}
+
+// MARK: - Herdr d59d0603: Claude unicode spinner
+
+@Test func claudeEightSpokedAsteriskSpinnerIsWorking() {
+    for status in ["✳ Pondering… (12s · ↓ 1.2k tokens)", "  ✳ Pondering…"] {
+        let detection = upstreamDetection(.claude, "\(status)\n\n────\n❯\n────")
+        #expect(detection.state == .working, "\(status)")
+        #expect(detection.ruleID == "live_turn_working")
+    }
+    #expect(upstreamDetection(.claude, "✳ Pondered for 12s").ruleID != "live_turn_working")
+}
+
+// MARK: - Herdr d59d0603: Grok configurable titles and visible activity
+
+@Test(arguments: [
+    ("project · session · id", EngineState.idle, "prompt_hints_idle"),
+    ("grok", .idle, "osc_title_idle"),
+    ("⠋ - Waiting for response… - project", .working, "osc_title_working"),
+    ("project - ⠹ - session", .working, "osc_title_working"),
+    ("⚠ Action Required - project", .blocked, "osc_title_blocked"),
+])
+func grokTitleActivityRequiresASpinner(_ title: String, _ state: EngineState, _ rule: String) {
+    let detection = upstreamDetection(.grok, "Shift+Tab:mode │ Ctrl+.:shortcuts\n", title: title)
+    #expect(detection.state == state, "\(title)")
+    #expect(detection.ruleID == rule, "\(title)")
+}
+
+@Test(arguments: [
+    ("⠴ Sleep for 8 … 1.9s 5.0s ⇣19.5k [↓][stop]\n", "spinner_status_working"),
+    ("Shift+Tab:mode │ Ctrl+c:cancel │ Ctrl+.:shortcuts\n", "esc_cancel_hints_working"),
+    ("Shift+Tab:mode │ Esc:cancel │ Ctrl+.:shortcuts\n", "esc_cancel_hints_working"),
+    ("◎ 1 command still running\n", "background_status_working"),
+    ("○ 1 command still running\n", "background_status_working"),
+    (
+        "◎ 2 commands · 1 subagent still running · send a message to interrupt\n",
+        "background_status_working"
+    ),
+])
+func grokVisibleActivityOutranksTheIdleTitle(_ screen: String, _ rule: String) {
+    let detection = upstreamDetection(.grok, screen, title: "grok")
+    #expect(detection.state == .working, "\(screen)")
+    #expect(detection.ruleID == rule)
+
+    let blocked = upstreamDetection(.grok, screen, title: "⚠ Action Required - grok")
+    #expect(blocked.state == .blocked)
+}
+
+@Test(arguments: [
+    "1 command still running\n",
+    "◎ 0 commands still running\n",
+    "Discussed: ◎ 1 command still running\n",
+    "◎ 1 command still running\n1\n2\n3\n4\n5\n6\n7\n8\n9\n10\n11\n12\n",
+    "Worked for 3.9s\nShift+Tab:mode │ Ctrl+.:shortcuts\n",
+])
+func grokBackgroundActivityRequiresALiveNonzeroStatusRow(_ screen: String) {
+    #expect(upstreamDetection(.grok, screen, title: "project · session").state == .idle)
+}
+
+// MARK: - Herdr d59d0603: Cline inline prompts and composer
+
+@Test(arguments: [
+    (
+        "Cline needs permission\nApprove tool call?\n  [y] Approve   [n] Deny",
+        EngineState.blocked, "inline_tool_permission"
+    ),
+    (
+        "Cline is asking a question\nWhich file?\n> src/main.rs\n────\n(Tab) mode · Shift+Tab auto-approve",
+        .blocked, "inline_question"
+    ),
+    ("⠹ Reading src/main.rs\n────\n❯\n────\n(Tab) mode · Shift+Tab", .working, "active_turn"),
+    ("Thinking... (esc to cancel)", .working, "active_turn"),
+    ("Done.\n────\n❯ next task\n────\n(Tab) mode · Shift+Tab auto-approve", .idle, "composer_idle"),
+])
+func clineRecognizesInlineState(_ screen: String, _ state: EngineState, _ rule: String) {
+    let detection = upstreamDetection(.cline, screen)
+    #expect(detection.state == state, "\(screen)")
+    #expect(detection.ruleID == rule, "\(screen)")
+    #expect(detection.visible)
+}
+
+// MARK: - Herdr d59d0603: Letta Code
+
+@Test(arguments: [
+    ("Run this command?\n  ls -la\n❯ Yes\n  No\nEnter to select · Esc to cancel", "", EngineState.blocked, "command_approval"),
+    ("›", "[ ! ] Action Required | agent", .blocked, "osc_title_blocked"),
+    ("›", "⠹ agent | project", .working, "osc_title_working"),
+    ("Memo is thinking… (esc to interrupt · 12s)\n›", "", .working, "active_status"),
+    ("Memo is thinking… (interrupting)\n›", "", .working, "active_status"),
+    ("● Bash(sleep 5)\n  └ Running... (3s)\n›", "", .working, "running_tool"),
+    ("● Done\n\n›", "", .idle, "composer_idle"),
+    ("› Try \"fix the failing test\"", "", .idle, "composer_idle"),
+])
+func lettaRecognizesLiveState(
+    _ screen: String, _ title: String, _ state: EngineState, _ rule: String
+) {
+    let detection = upstreamDetection(.letta, screen, title: title)
+    #expect(detection.state == state, "\(screen)")
+    #expect(detection.ruleID == rule, "\(screen)")
+    #expect(detection.visible)
+}
+
+@Test(arguments: [
+    ("⠹ transcript spinner without status chrome", "no_live_state_evidence"),
+    ("Create a new agent (--new)\nEnter select · Esc exit", "profile_selector"),
+    ("› unsent draft", "composer_input"),
+])
+func lettaAmbiguousScreensAreUnknown(_ screen: String, _ rule: String) {
+    let detection = upstreamDetection(.letta, screen)
+    #expect(detection.state == .unknown)
+    #expect(detection.ruleID == rule)
     #expect(!detection.skip)
 }

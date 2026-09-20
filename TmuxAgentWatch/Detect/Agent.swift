@@ -31,6 +31,7 @@ nonisolated enum Agent: String, CaseIterable, Sendable {
     case kilo
     case qodercli
     case qwen
+    case letta
     case maki
     case muse
 
@@ -60,7 +61,7 @@ nonisolated enum Agent: String, CaseIterable, Sendable {
         case "cursor", "cursor-agent": return .cursor
         case "devin", "devin-cli", "devin cli": return .devin
         case "agy", "antigravity", "antigravity-cli": return .antigravity
-        case "cline": return .cline
+        case "cline", ".cline": return .cline
         case "omp": return .omp
         case "mastracode", "mastra-code", "mastra code": return .mastracode
         case "opencode", "opencode2", "open-code": return .openCode
@@ -74,6 +75,7 @@ nonisolated enum Agent: String, CaseIterable, Sendable {
         case "kilo", "kilo-code", "kilo code": return .kilo
         case "qodercli", "qoderclicn", "qoder", "qodercn": return .qodercli
         case "qwen", "qwen-code", "qwen code": return .qwen
+        case "letta", "letta-code", "letta code": return .letta
         case "maki": return .maki
         case "muse", "muse-code", "muse-cli": return .muse
         default:

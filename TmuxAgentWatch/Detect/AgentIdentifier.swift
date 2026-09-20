@@ -42,7 +42,9 @@ nonisolated enum AgentIdentifier {
     static func identifyAgent(in job: ForegroundJob) -> (Agent, String)? {
         if let process = job.processes.first(where: { $0.pid == job.processGroupID }) {
             let candidate = normalizedProcessName(process)
-            if let agent = Agent.parse(label: candidate) {
+            if let agent = Agent.parse(label: candidate),
+                agent != .letta || isInteractiveLettaProcess(process)
+            {
                 return (agent, candidate)
             }
         }
@@ -52,6 +54,7 @@ nonisolated enum AgentIdentifier {
         for process in job.processes {
             let candidate = normalizedProcessName(process)
             guard let agent = Agent.parse(label: candidate) else { continue }
+            if agent == .letta && !isInteractiveLettaProcess(process) { continue }
             let score = processPriority(process, normalizedName: candidate)
             if let current = best, current.score >= score { continue }
             best = (score, agent, candidate)
@@ -77,13 +80,15 @@ nonisolated enum AgentIdentifier {
 
         // Qwen Code never rewrites its process title, so a plain `node
         // …/qwen.js` invocation is only identifiable through its script
-        // argument even when argv[0] is not a generic runtime name.
+        // argument even when argv[0] is not a generic runtime name. Cline
+        // and Letta launchers need the same unwrapping.
         if let runtime = process.argv?.first {
             let runtimeName = normalizedAgentLookupName(pathBasename(runtime))
             if runtimeName == "node" || runtimeName == "bun",
                 let wrappedAgent = wrappedAgentNameFromRuntimeArgv(
                     runtime: runtime, argv: process.argv),
-                Agent.parse(label: wrappedAgent) == .qwen
+                let agent = Agent.parse(label: wrappedAgent),
+                [.qwen, .cline, .letta].contains(agent)
             {
                 return wrappedAgent
             }
@@ -196,10 +201,15 @@ nonisolated enum AgentIdentifier {
         {
             return Agent.pi.label
         }
+        let kimiEntrypoint = ["node_modules", "@moonshot-ai", "kimi-code", "dist", "main.mjs"]
+        if rawComponents.suffix(kimiEntrypoint.count).elementsEqual(kimiEntrypoint) {
+            return Agent.kimi.label
+        }
 
         let components = rawComponents.map(normalizedAgentLookupName)
         let needles: [(needle: [String], agent: Agent)] = [
             (["node_modules", "@qwen-code", "qwen-code", "dist", "index"], .qwen),
+            (["node_modules", "@letta-ai", "letta-code", "letta"], .letta),
         ]
 
         for (needle, agent) in needles {
@@ -208,6 +218,83 @@ nonisolated enum AgentIdentifier {
             where Array(components[start..<(start + needle.count)]) == needle {
                 return agent.label
             }
+        }
+        return nil
+    }
+
+    // MARK: - Letta interactive sessions
+
+    /// Letta's CLI also runs headless prompts, servers, and subcommands under
+    /// the same entrypoint; only the interactive TUI counts as an agent pane.
+    private static func isInteractiveLettaProcess(_ process: ForegroundProcess) -> Bool {
+        let argv: [String]
+        if let processArgv = process.argv {
+            argv = processArgv
+        } else {
+            argv = (process.cmdline ?? "").split(whereSeparator: \.isWhitespace).map {
+                $0.trimmingCharacters(in: CharacterSet(charactersIn: "\"'"))
+            }
+            if argv.isEmpty { return true }
+        }
+
+        let cliArgs = lettaEntrypointIndex(argv).map { Array(argv[($0 + 1)...]) } ?? argv
+        let headless = cliArgs.contains { arg in
+            let option = arg.split(separator: "=", maxSplits: 1, omittingEmptySubsequences: false)
+                .first.map(String.init) ?? arg
+            return lettaNonInteractiveOptions.contains(option)
+        }
+        if headless { return false }
+
+        guard let first = lettaFirstArgAfterBackendSelection(cliArgs) else { return true }
+        return first.hasPrefix("-")
+    }
+
+    private static let lettaNonInteractiveOptions: Set<String> = [
+        "-p", "--print", "--prompt", "--json", "--stream-json", "--run",
+        "--disable-memory-guard", "--output-format", "--input-format",
+        "--include-partial-messages", "--from-agent", "--environment", "--env",
+        "--pre-load-skills", "--tags", "--ephemeral", "--stateless", "--max-turns",
+        "--memfs-startup", "-h", "--help", "-v", "--version", "--info", "--update",
+        "--upgrade",
+    ]
+
+    private static func lettaEntrypointIndex(_ argv: [String]) -> Int? {
+        func isLetta(_ arg: String) -> Bool {
+            agentNameFromPathToken(arg) == Agent.letta.label
+        }
+        guard let first = argv.first else { return nil }
+        if isLetta(first) { return 0 }
+
+        let runtime = normalizedAgentLookupName(pathBasename(first))
+        guard runtime == "node" || runtime == "bun" else { return nil }
+
+        var index = 1
+        while index < argv.count {
+            let arg = argv[index]
+            if arg == "--" {
+                return index + 1 < argv.count && isLetta(argv[index + 1]) ? index + 1 : nil
+            }
+            if flagMatches(arg, ["-e", "--eval", "-p", "--print"]) {
+                return nil
+            }
+            if arg.hasPrefix("-") {
+                index += optionTakesValue(arg) ? 2 : 1
+                continue
+            }
+            return isLetta(arg) ? index : nil
+        }
+        return nil
+    }
+
+    private static func lettaFirstArgAfterBackendSelection(_ args: [String]) -> String? {
+        var iterator = args.makeIterator()
+        while let arg = iterator.next() {
+            if arg == "--backend" {
+                _ = iterator.next()
+                continue
+            }
+            if arg.hasPrefix("--backend=") { continue }
+            return arg
         }
         return nil
     }

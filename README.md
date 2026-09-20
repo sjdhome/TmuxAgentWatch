@@ -151,6 +151,15 @@ python3 scripts/convert-manifests.py            # reads ../herdr/src/detect/mani
 python3 scripts/convert-manifests.py <src-dir>  # custom manifest dir
 ```
 
+To convert a pinned revision without moving the sibling checkout's working
+tree, export it first and pass the exported directory:
+
+```sh
+git -C ../herdr fetch origin
+git -C ../herdr archive <commit> src/detect/manifests | tar -x -C <tmp-dir>
+python3 scripts/convert-manifests.py <tmp-dir>/src/detect/manifests
+```
+
 Re-run the unit tests afterwards; they gate manifest count, agent-label
 mapping, and region coverage. If a manifest starts using a region this
 engine does not implement, port it in `Detect/DetectionEngine.swift`
@@ -160,6 +169,61 @@ and any identification quirks ported into `Detect/AgentIdentifier.swift`
 from herdr's `src/detect/mod.rs`.
 
 ### Upstream sync baseline
+
+Synced on **2026-09-20 (Asia/Shanghai)** to Herdr
+[`d59d0603d53bb88c5320ea508a4fb9858b61af68`](https://github.com/ogulcancelik/herdr/commit/d59d0603d53bb88c5320ea508a4fb9858b61af68),
+from `4b5e9bda`, to incorporate upstream recognition fixes:
+
+- 24 recognized agents, 22 bundled manifests: adds Letta Code (`letta`,
+  `letta-code`, the `@letta-ai/letta-code` package entrypoint). Only the
+  interactive TUI counts: headless flags (`--prompt`, `--output-format`, …),
+  subcommands, and positional prompts are rejected, with `--backend` skipped
+  before that check. Its manifest prefers the pane title and status chrome
+  over transcript spinners, and reports ambiguous screens as unknown (shown
+  as idle).
+- Codex `screen_working_fallback` now reads the new
+  `before_current_prompt_marker` region, everything above the current composer,
+  rather than the bottom three lines. It accepts dynamic activity labels,
+  hidden bullets, and queued-input blocks below the status, and rejects status
+  text followed by a response, interruption, or `─ Worked for … ─` marker. Weak
+  blockers are also ignored when a composer sparkle (`›⠁` …) replaces the
+  space after `›`.
+- Grok no longer treats any non-idle title as working: the title needs a
+  braille spinner, since title items are configurable. Visible spinner rows,
+  `esc:cancel` / `ctrl+c:cancel` hints, and the 1.0.34 `N commands still
+  running` status row outrank the idle title.
+- Cline recognizes inline tool approvals and questions, the active-turn
+  spinner, and the idle composer. Its `.cline` native binary and
+  `node …/cline` launchers are identified; the latter uses the same script
+  argument unwrapping as Qwen, which Letta also needs.
+- Claude's active-turn spinner accepts `✳` (U+2733).
+- Kimi is identified from `@moonshot-ai/kimi-code/dist/main.mjs`.
+- Pi gained an upstream `working_border` rule. It is bundled for source parity
+  but still not evaluated: it covers only the exact `Working` label, and the
+  manifest keeps the full-screen `Working...` literal that the native shim
+  below exists to avoid.
+
+No settings migration is needed. The manifest engine remains version 3, and
+polling, debounce, and Pi precedence are unchanged. tmux exposes no OSC 9;4
+progress, so Grok and Letta `osc_progress` rules never match here; their title
+and screen rules carry detection. The Codex pattern is a multiline regex that
+Rust runs in linear time and ICU by backtracking; the manifest's `contains`
+pre-filter runs first, and every test case exercising it (up to six screens
+each) finished within 10 ms.
+
+Not part of this sync, and still unported from before the previous baseline:
+the `node_modules/mastracode/dist/cli` package path and Cursor's bundled-node
+launcher. Windows-only launcher handling (`cmd`, PowerShell) is out of scope.
+
+Validation: the documented Xcode unit-test command passed on Xcode 27.0
+(macOS 26.6.2): 147 tests, 331 runs including parameterized cases, no failures.
+The `d59d0603` sections of `UpstreamDetectionTests.swift` and
+`AgentIdentifierTests.swift` port upstream's Codex, Grok, Cline, Kimi, and
+Letta identification cases. Upstream ships no Letta or Cline screen tests, so
+those screens are synthetic, written from the manifest rules, and are not
+validated against live agent UIs.
+
+#### Previous sync
 
 Synced on **2026-09-07 (Asia/Shanghai)** to Herdr
 [`4b5e9bda239a0b6903889062d756424578e94691`](https://github.com/ogulcancelik/herdr/commit/4b5e9bda239a0b6903889062d756424578e94691),
