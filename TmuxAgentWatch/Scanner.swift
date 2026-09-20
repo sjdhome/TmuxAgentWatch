@@ -67,6 +67,7 @@ nonisolated struct StateCounts: Sendable, Equatable {
 
 nonisolated enum Scanner {
     private static let piAskUserRuleID = "pi_ask_user_waiting"
+    private static let piPermissionsRuleID = "pi_permissions_waiting"
 
     /// Run one scan with debounced states folded through the store.
     static func scanDebounced(store: StateStore) -> Snapshot {
@@ -124,8 +125,14 @@ nonisolated enum Scanner {
     }
 
     private static func nativeBlocker(agent: Agent, screen: String) -> Detection? {
-        guard agent == .pi, PiAskUser.isWaitingForUser(screen: screen) else { return nil }
-        return Detection(state: .blocked, ruleID: piAskUserRuleID, skip: false, visible: true)
+        guard agent == .pi else { return nil }
+        if PiAskUser.isWaitingForUser(screen: screen) {
+            return Detection(state: .blocked, ruleID: piAskUserRuleID, skip: false, visible: true)
+        }
+        if PiPermissions.isWaitingForUser(screen: screen) {
+            return Detection(state: .blocked, ruleID: piPermissionsRuleID, skip: false, visible: true)
+        }
+        return nil
     }
 
     /// The engine input is the visible screen with trailing blank rows

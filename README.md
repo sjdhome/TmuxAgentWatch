@@ -104,8 +104,9 @@ for the full design rationale):
    foreground process group of the pane's terminal is resolved via
    `proc_pidinfo`/`proc_listpids`, unwrapping runtime wrappers (`node`,
    `python`, shells) and nested-PTY wrapper shells to find the agent process.
-2. **Native Pi observations** (`Detect/PiAskUser.swift`, `Detect/PiWorking.swift`)
-   — the active `ask_user` extension UI takes precedence as **blocked**;
+2. **Native Pi observations** (`Detect/PiAskUser.swift`,
+   `Detect/PiPermissions.swift`, `Detect/PiWorking.swift`) — the active
+   `ask_user` or Jev permissions approval UI takes precedence as **blocked**;
    otherwise a built-in spinner in the current editor border or the standalone
    compaction loader immediately above it means **working**. Pi falls back to
    **idle**, never to the legacy full-screen literal rule.
@@ -314,6 +315,40 @@ standalone compaction with both cancel hints, rejection of transcript/draft/
 widget text and legacy literals, blocker precedence, and return-to-idle
 behavior. Existing actor-isolation, Info.plist, and AppIntents metadata
 warnings remain unchanged.
+
+### Native Jev permissions approval compatibility
+
+Added on **2026-09-20 (Asia/Shanghai)** because Pi's Jev approval dialog was
+not covered by the existing `ask_user` blocker. The reference is
+`ApprovalDialog` in `../pi-agent-extensions/src/jev-permissions.ts`.
+`PiPermissions` recognizes the complete Allow / optional Expand or Collapse
+built-in preview / Deny controls with one selected arrow, followed by the
+`↑↓ navigate  enter select  esc deny` help, blank spacer, and left-aligned
+bottom border. Both normal and DANGER approvals produce
+`pi_permissions_waiting`; color and the tool's name do not affect detection.
+
+The title may be offscreen; the complete options and footer must remain
+visible. Word-boundary wrapping and trailing padding are supported, but
+truncated controls, words split across rows, borders narrower than eight
+columns, and later widgets adding left-aligned borders are not. Only the
+last left-aligned border is considered, so a newer editor supersedes old
+approval text. Exact imitation of the controls and border remains ambiguous:
+this is a screen heuristic, not a runtime permission signal.
+
+`ask_user` retains first priority, followed by Jev approval, then Pi activity
+and idle fallback. Automatic checks and denial notifications alone are not
+blockers. Polling, startup grace, and debounce are unchanged; no settings
+migration or extension changes are needed. The non-TUI selector is not
+covered. Keep this rule outside generated manifests and recheck it when
+`ApprovalDialog` changes; replace it only when upstream detection covers the
+same active and negative cases.
+
+Validation: the documented Xcode unit-test command passed on Xcode 27.0 /
+macOS 26.6.2: 160 tests, 365 runs including parameterized cases, no failures.
+`PiPermissionsTests.swift` adds 34 synthetic-screen runs covering selections,
+preview toggles, wrapping, false positives, precedence, and transitions.
+No live Jev approval UI was validated. The existing AppIntents metadata
+warning remains.
 
 ## Rejected features
 
