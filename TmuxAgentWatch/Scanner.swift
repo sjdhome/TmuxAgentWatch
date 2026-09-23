@@ -66,7 +66,6 @@ nonisolated struct StateCounts: Sendable, Equatable {
 }
 
 nonisolated enum Scanner {
-    private static let piAskUserRuleID = "pi_ask_user_waiting"
     private static let piPermissionsRuleID = "pi_permissions_waiting"
 
     /// Run one scan with debounced states folded through the store.
@@ -115,10 +114,14 @@ nonisolated enum Scanner {
     /// precedence over the herdr-derived manifest result.
     static func detectScreen(agent: Agent, rawScreen: String, paneTitle: String) -> Detection {
         let screen = detectionScreen(rawScreen)
-        if let detection = nativeBlocker(agent: agent, screen: screen) {
-            return detection
-        }
         if agent == .pi {
+            if let detection = PiAskUser.detect(screen: screen) {
+                return detection
+            }
+            if PiPermissions.isWaitingForUser(screen: screen) {
+                return Detection(
+                    state: .blocked, ruleID: piPermissionsRuleID, skip: false, visible: true)
+            }
             // Only explicit Pi status chrome is supported. The upstream legacy
             // literal matches transcript, draft, and widget text as well as work.
             return PiWorking.detect(screen: screen) ?? .knownAgentIdleFallback
@@ -133,18 +136,6 @@ nonisolated enum Scanner {
             return .knownAgentIdleFallback
         }
         return evaluate(manifest: manifest, input: input)
-    }
-
-    private static func nativeBlocker(agent: Agent, screen: String) -> Detection? {
-        guard agent == .pi else { return nil }
-        if PiAskUser.isWaitingForUser(screen: screen) {
-            return Detection(state: .blocked, ruleID: piAskUserRuleID, skip: false, visible: true)
-        }
-        if PiPermissions.isWaitingForUser(screen: screen) {
-            return Detection(
-                state: .blocked, ruleID: piPermissionsRuleID, skip: false, visible: true)
-        }
-        return nil
     }
 
     /// The engine input is the visible screen with trailing blank rows

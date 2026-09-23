@@ -168,10 +168,12 @@ for the full design rationale):
    `python`, shells) and nested-PTY wrapper shells to find the agent process.
 2. **Native Pi observations** (`Detect/PiAskUser.swift`,
    `Detect/PiPermissions.swift`, `Detect/PiWorking.swift`) — the active
-   `ask_user` or Jev permissions approval UI takes precedence as **blocked**;
-   otherwise a built-in spinner in the current editor border or the standalone
-   compaction loader immediately above it means **working**. Pi falls back to
-   **idle**, never to the legacy full-screen literal rule.
+   `ask_user` UI takes precedence: **working** while Ask AI requests or streams
+   an explanation, **blocked** while waiting for user action. Next comes Jev
+   permissions approval as **blocked**; otherwise a built-in spinner in the
+   current editor border or the standalone compaction loader immediately above
+   it means **working**. Pi falls back to **idle**, never to the legacy
+   full-screen literal rule.
 3. **Screen detection** (`Detect/DetectionEngine.swift`) — for other agent panes,
    `capture-pane -p` plus `#{pane_title}` are
    matched against per-agent rule manifests (regions, AND/OR/NOT gates,
@@ -383,6 +385,54 @@ changing the system-wide selection. At that baseline, hosted tests could briefly
 run the app's normal tmux scan; the current shared scheme disables that scan as
 described above. These tests do not validate live agent UI versions.
 
+### Native Pi Ask dialog compatibility
+
+Expanded on **2026-09-23 (Asia/Shanghai)** after a live Ask dialog was reported
+as idle: the extension inserted `n note` into the choice help lines, invalidating
+the old prefixes. The source references are `../pi-agent-extensions/src/ask-user.ts`
+(`helpText()` and `render()`) and `src/ask-user/clarification-view.ts` in that
+repository (`buildHelpText()` and `render()`).
+
+`PiAskUser.detect` now returns a complete observation rather than a blocker
+boolean. It recognizes both legacy and current choice controls, Other and note
+editors, text questions, and answer review. Validation errors and unavailable-AI
+messages retain the enclosing dialog's blocked state. Ask AI input, completed
+answers (including scrolling), and request errors also produce **blocked** with
+`pi_ask_user_waiting`. Only the clarification footer containing
+`Esc cancel and return` produces **working**, with
+`pi_ask_user_clarification_working`; `Esc back to options` means the user must act.
+This deliberately reflects the active explanation request, not merely the fact
+that the outer tool still awaits a final answer. Response text and `Thinking…`
+are not status signals: even a completed empty answer can render that label.
+
+Only the last left-aligned border candidate is considered, and it must be a
+plain `─` border at least eight columns wide, immediately below a recognized
+help prefix. A newer editor or dialog supersedes historical Ask text, including
+when transitioning between Ask and Jev approval. Titles may be clipped or custom;
+trailing padding, scroll-position suffixes, nested indented editor borders, and
+tall task widgets below the dialog are supported. Truncation is supported only
+**after** the distinctive help prefix. Missing/truncated prefixes or borders,
+widgets adding later left-aligned borders, and exact imitations of dialog chrome
+remain limitations of screen-only detection. An unrecognized Ask screen makes
+no Ask observation and follows the normal Pi fallback; it is not proof of idle.
+
+The scanner checks Ask observations before approval and ordinary Pi activity.
+Polling, startup grace, other agents, and generated manifests are unchanged;
+after startup grace, working explanations switch back to blocked on the next
+observation without extra debounce. No settings migration, hooks, or extension
+changes are needed. Keep these prefixes aligned with the referenced renderers;
+replace this native rule only when upstream covers the same states and negative
+cases without matching arbitrary transcript text.
+
+Validation: a sanitized fixture of the reported layout failed before the fix.
+The standard unit-test command then passed: 193 tests, 456 runs including
+parameterized cases, zero failures; the opt-in isolated-tmux test was skipped.
+Release build succeeded; the existing AppIntents metadata warning remains.
+`PiAskUserTests.swift` covers the source-defined subviews, suffix truncation,
+validation/error states, precedence, historical/quoted text, and round trips
+through the scanner and state store. The initial Ask layout was inspected live;
+Ask AI and other subviews use synthetic fixtures, not live interactive validation.
+
 ### Native Pi editor-status compatibility
 
 Added on **2026-09-09 (Asia/Shanghai)** after a live pane showed
@@ -457,10 +507,12 @@ last left-aligned border is considered, so a newer editor supersedes old
 approval text. Exact imitation of the controls and border remains ambiguous:
 this is a screen heuristic, not a runtime permission signal.
 
-`ask_user` retains first priority, followed by Jev approval, then Pi activity
-and idle fallback. Automatic checks and denial notifications alone are not
-blockers. Polling, startup grace, and debounce are unchanged; no settings
-migration or extension changes are needed. The non-TUI selector is not
+Active `ask_user` observations retain first priority (including Ask AI activity
+as described above), followed by Jev approval, then Pi editor activity and idle
+fallback. Historical dialogs superseded by a newer border do not participate.
+Automatic checks and denial notifications alone are not blockers. Polling,
+startup grace, and debounce are unchanged; no settings migration or extension
+changes are needed. The non-TUI selector is not
 covered. Keep this rule outside generated manifests and recheck it when
 `ApprovalDialog` changes; replace it only when upstream detection covers the
 same active and negative cases.

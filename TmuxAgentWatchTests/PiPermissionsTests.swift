@@ -150,7 +150,7 @@ import Testing
         #expect(detect("new Text(theme.fg(\"dim\", \"↑↓ navigate  enter select  esc deny\"), 1, 0);").state == .idle)
     }
 
-    @Test func approvalOverridesWorkingAndPreservesAskUserPrecedence() {
+    @Test func approvalOverridesWorkingAndNewestDialogSupersedesHistoricalAsk() {
         // A simultaneous status border must not outrank active approval controls.
         let body = dialog().split(separator: "\n", omittingEmptySubsequences: false)
             .dropFirst().joined(separator: "\n")
@@ -158,7 +158,11 @@ import Testing
         #expect(PiWorking.detect(screen: screen)?.state == .working)
         #expect(detect(screen).state == .blocked)
         let askUser = "Question\n Enter submit • Tab/Shift+Tab navigate • Esc cancel\n\(border)\n"
-        #expect(detect(askUser + dialog()).ruleID == "pi_ask_user_waiting")
+        #expect(detect(askUser + dialog()).ruleID == "pi_permissions_waiting")
+        #expect(detect(dialog() + "\n" + askUser).ruleID == "pi_ask_user_waiting")
+        let askAI = " ↑↓/PgUp/PgDn scroll • Esc cancel and return\n\(border)\n"
+        #expect(detect(askAI + dialog()).ruleID == "pi_permissions_waiting")
+        #expect(detect(dialog() + "\n" + askAI).ruleID == "pi_ask_user_clarification_working")
     }
 
     @Test func doesNotApplyToOtherAgents() {
