@@ -47,12 +47,13 @@ nonisolated enum ProcessInspector {
             guard let info = bsdInfo(pid: pid), info.pbi_pgid == fgPgid,
                 let name = comm(from: info)
             else { continue }
-            let argv = processArgv(pid: pid)
+            let arguments = kernProcargs2(pid: pid)
+            let argv = arguments.flatMap(parseProcargs2Argv)
             processes.append(
                 ForegroundProcess(
                     pid: pid,
                     name: name,
-                    argv0: processArgv0Name(pid: pid),
+                    argv0: arguments.flatMap(parseProcargs2Argv0),
                     argv: argv,
                     cmdline: argv.map { $0.joined(separator: " ") }))
         }
@@ -141,14 +142,10 @@ nonisolated enum ProcessInspector {
         return name.isEmpty ? nil : name
     }
 
-    private static func processArgv(pid: UInt32) -> [String]? {
-        kernProcargs2(pid: pid).flatMap(parseProcargs2Argv)
-    }
-
-    /// Effective process name from `argv[0]`; reflects runtime title changes
-    /// like Node.js `process.title = "pi"`.
-    private static func processArgv0Name(pid: UInt32) -> String? {
-        guard let buffer = kernProcargs2(pid: pid), buffer.count >= 4 else { return nil }
+    /// Effective name from the same buffer used for argv. Keep this parser
+    /// independent: a truncated later argument must not discard a valid argv[0].
+    static func parseProcargs2Argv0(_ buffer: [UInt8]) -> String? {
+        guard buffer.count >= 4 else { return nil }
         let argc = buffer.prefix(4).withUnsafeBytes { $0.loadUnaligned(as: Int32.self) }
         guard argc >= 1 else { return nil }
 

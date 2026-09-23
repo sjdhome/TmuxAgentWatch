@@ -1,55 +1,43 @@
-//
-//  TmuxClient.swift
-//  TmuxAgentWatch
-//
-//  The single tmux boundary of the program, ported from tmux-agent-watch's
-//  src/tmux.rs.
-//
-//  Only the read-only polling verbs (`list-panes`, `capture-pane`,
-//  `list-clients`) plus the single user-initiated navigation command
-//  (`select-window` + `select-pane`, double-click jump) may appear in this
-//  file. The app must never write to panes or send input to agents.
-//
+// The tmux boundary. Polling uses only list-panes and capture-pane; navigation
+// additionally uses list-clients and user-initiated select-window/select-pane.
+// Control mode is short-lived and never attaches or creates a session.
 
 import Foundation
 
-/// One tmux pane as reported by `list-panes -a`.
 nonisolated struct PaneInfo: Sendable, Equatable {
     var session: String
     var windowIndex: UInt32
     var windowName: String
-    /// Stable pane id, e.g. "%3". Used as the tracking key.
     var paneID: String
     var panePid: UInt32
-    /// Maps to the detection engine's `osc_title` input.
     var paneTitle: String
-    /// Cheap hint only; pid-based identification stays authoritative.
+    /// Cheap hint only; PID-based identification stays authoritative.
     var currentCommand: String
 }
 
-/// One attached tmux client as reported by `list-clients`.
 nonisolated struct TmuxClientInfo: Sendable, Equatable {
-    /// PID of the `tmux` client process (runs inside the hosting terminal).
     var pid: UInt32
-    /// The client's terminal device, e.g. "/dev/ttys003" — the tty the
-    /// hosting terminal window is rendering.
     var tty: String
-    /// Name of the session the client is attached to.
     var session: String
 }
 
-/// tmux could not be queried (server not running, binary missing, ...).
 nonisolated struct TmuxUnavailable: Error, Sendable {
     var message: String
 }
 
-nonisolated enum TmuxClient {
+/// One scanner owns one client, including its compatibility fallback decision.
+/// There is no resident tmux process. Calls run through a bounded subprocess port.
+actor TmuxClient {
+    typealias Run = @Sendable (String, [String]) async throws -> SubprocessResult
+    private let executable: String?
+    private let globalArguments: [String]
+    private let run: Run
+    private var supportsBatch = true
+    private static let batchSize = 32
     private static let listPanesFormat =
         "#{session_name}\t#{window_index}\t#{window_name}\t#{pane_id}\t#{pane_pid}\t#{pane_title}\t#{pane_current_command}"
 
-    /// GUI apps inherit a minimal PATH, so the tmux binary is resolved from
-    /// the usual install locations plus whatever PATH does carry.
-    static let tmuxPath: String? = {
+    nonisolated static let tmuxPath: String? = {
         var candidates = ["/opt/homebrew/bin/tmux", "/usr/local/bin/tmux", "/usr/bin/tmux"]
         if let path = ProcessInfo.processInfo.environment["PATH"] {
             candidates += path.split(separator: ":").map { "\($0)/tmux" }
@@ -57,135 +45,150 @@ nonisolated enum TmuxClient {
         return candidates.first { FileManager.default.isExecutableFile(atPath: $0) }
     }()
 
-    static func listPanes() -> Result<[PaneInfo], TmuxUnavailable> {
-        guard let tmuxPath else {
-            return .failure(TmuxUnavailable(message: "tmux binary not found"))
+    /// GUI launches often lack a UTF-8 locale, which otherwise makes tmux
+    /// sanitize tabs and non-ASCII titles, breaking field parsing.
+    nonisolated static let subprocessEnvironment: [String: String] = {
+        var environment = ProcessInfo.processInfo.environment
+        let locales = [environment["LC_ALL"], environment["LC_CTYPE"], environment["LANG"]]
+            .compactMap { $0 }
+        if !locales.contains(where: { $0.uppercased().contains("UTF-8") }) {
+            environment["LC_CTYPE"] = "en_US.UTF-8"
         }
-        let result: SubprocessResult
+        return environment
+    }()
+
+    init(
+        executable: String? = TmuxClient.tmuxPath, globalArguments: [String] = [],
+        run: @escaping Run = { path, arguments in
+            try await SubprocessRunner.run(
+                path, arguments, environment: TmuxClient.subprocessEnvironment)
+        }
+    ) {
+        self.executable = executable
+        self.globalArguments = globalArguments
+        self.run = run
+    }
+
+    private func execute(_ arguments: [String]) async throws -> SubprocessResult {
+        try Task.checkCancellation()
+        guard let executable else { throw TmuxUnavailable(message: "tmux binary not found") }
+        return try await run(executable, globalArguments + arguments)
+    }
+
+    func listPanes() async throws -> Result<[PaneInfo], TmuxUnavailable> {
         do {
-            result = try runSubprocess(tmuxPath, ["list-panes", "-a", "-F", listPanesFormat])
+            let result = try await execute(["list-panes", "-a", "-F", Self.listPanesFormat])
+            guard result.exitCode == 0 else {
+                let message = result.stderr.trimmingCharacters(in: .whitespacesAndNewlines)
+                return .failure(
+                    TmuxUnavailable(
+                        message: message.isEmpty ? "tmux exited with \(result.exitCode)" : message))
+            }
+            return .success(Self.parseListPanes(result.stdout))
+        } catch is CancellationError {
+            throw CancellationError()
+        } catch let error as TmuxUnavailable {
+            return .failure(error)
         } catch {
-            return .failure(TmuxUnavailable(message: "failed to run tmux: \(error.localizedDescription)"))
+            return .failure(TmuxUnavailable(message: "failed to query tmux: \(error)"))
         }
-
-        guard result.exitCode == 0 else {
-            let stderr = result.stderr.trimmingCharacters(in: .whitespacesAndNewlines)
-            let message = stderr.isEmpty ? "tmux exited with \(result.exitCode)" : stderr
-            return .failure(TmuxUnavailable(message: message))
-        }
-
-        return .success(parseListPanes(result.stdout))
     }
 
-    /// Visible screen text of a pane. `nil` when the pane vanished between
-    /// `list-panes` and the capture, or capture failed for any other reason.
-    static func capturePane(paneID: String) -> String? {
-        guard let tmuxPath,
-            let result = try? runSubprocess(tmuxPath, ["capture-pane", "-p", "-t", paneID]),
-            result.exitCode == 0
-        else { return nil }
-        return result.stdout
+    /// Normal case: one process for up to 32 screens. A failed target aborts
+    /// tmux's command queue; preserve completed blocks and retry only the
+    /// unexecuted suffix. Each retry consumes at least one requested target.
+    func capturePanes(paneIDs: [String]) async throws -> [String: String] {
+        // Linked windows can report the same pane in multiple sessions.
+        var seen: Set<String> = []
+        let ids = paneIDs.filter { seen.insert($0).inserted }
+        guard ids.allSatisfy(Self.isPaneID) else {
+            throw TmuxUnavailable(message: "invalid pane ID")
+        }
+        var screens: [String: String] = [:]
+        for start in stride(from: 0, to: ids.count, by: Self.batchSize) {
+            var remaining = Array(ids[start..<min(start + Self.batchSize, ids.count)])
+            while !remaining.isEmpty {
+                try Task.checkCancellation()
+                if !supportsBatch {
+                    for id in remaining {
+                        let result = try await execute(["capture-pane", "-p", "-t", id])
+                        if result.exitCode == 0 { screens[id] = result.stdout }
+                    }
+                    break
+                }
+                var arguments = ["-N", "-C"]
+                for (index, id) in remaining.enumerated() {
+                    if index > 0 { arguments.append(";") }
+                    arguments += ["capture-pane", "-p", "-t", id]
+                }
+                let result = try await execute(arguments)
+                guard let blocks = ControlModeOutput.parse(result.stdout),
+                    blocks.count <= remaining.count,
+                    blocks.dropLast().allSatisfy({
+                        if case .output = $0 { return true }
+                        return false
+                    }),
+                    (result.exitCode == 0 && blocks.count == remaining.count
+                        && blocks.last != .failure)
+                        || (result.exitCode != 0 && blocks.last == .failure)
+                else {
+                    // Remember incompatibility for this scanner lifetime; do not
+                    // pay for a failed capability probe every two seconds.
+                    supportsBatch = false
+                    NSLog("tmux batch framing unavailable; using individual captures")
+                    continue
+                }
+                for (id, block) in zip(remaining, blocks) {
+                    if case .output(let screen) = block { screens[id] = screen }
+                }
+                remaining.removeFirst(blocks.count)
+            }
+        }
+        return screens
     }
 
-    /// Clients currently attached to the server. Empty on any failure — a
-    /// failed lookup just means there is nothing to jump to.
-    static func listClients() -> [TmuxClientInfo] {
-        guard let tmuxPath,
-            let result = try? runSubprocess(
-                tmuxPath,
+    nonisolated private static func isPaneID(_ value: String) -> Bool {
+        value.first == "%" && value.count > 1
+            && value.dropFirst().allSatisfy { $0.isASCII && $0.isNumber }
+    }
+
+    /// Navigation is rare and intentionally stays separate from polling.
+    static func listClients() async -> [TmuxClientInfo] {
+        guard
+            let result = try? await TmuxClient().execute(
                 ["list-clients", "-F", "#{client_pid}\t#{client_tty}\t#{client_session}"]),
             result.exitCode == 0
         else { return [] }
         return rustLines(result.stdout).compactMap { parseClientLine(String($0)) }
     }
 
-    /// The one write verb: reveal the pane the user double-clicked. A pane
-    /// id (`%3`) is a globally unique tmux target, so `select-window` makes
-    /// the pane's window current in its session and `select-pane` makes the
-    /// pane itself active within that window — attached clients land with
-    /// focus on the exact pane.
     @discardableResult
-    static func selectPane(paneID: String) -> Bool {
-        guard let tmuxPath,
-            let result = try? runSubprocess(
-                tmuxPath,
-                ["select-window", "-t", paneID, ";", "select-pane", "-t", paneID]),
-            result.exitCode == 0
+    static func selectPane(paneID: String) async -> Bool {
+        guard isPaneID(paneID),
+            let result = try? await TmuxClient().execute(
+                ["select-window", "-t", paneID, ";", "select-pane", "-t", paneID])
         else { return false }
-        return true
+        return result.exitCode == 0
     }
 
-    static func parseListPanes(_ stdout: String) -> [PaneInfo] {
+    nonisolated static func parseListPanes(_ stdout: String) -> [PaneInfo] {
         rustLines(stdout).compactMap { parsePaneLine(String($0)) }
     }
 
-    /// Parse one `list-panes` line. Session/window names cannot contain tabs,
-    /// and the title is the second-to-last field, so a fixed 7-way split is
-    /// safe; malformed lines are skipped rather than aborting the cycle.
-    static func parsePaneLine(_ line: String) -> PaneInfo? {
+    nonisolated static func parsePaneLine(_ line: String) -> PaneInfo? {
         let fields = line.split(separator: "\t", maxSplits: 6, omittingEmptySubsequences: false)
         guard fields.count == 7,
-            let windowIndex = UInt32(fields[1]),
-            let panePid = UInt32(fields[4])
+            let windowIndex = UInt32(fields[1]), let panePid = UInt32(fields[4])
         else { return nil }
         return PaneInfo(
-            session: String(fields[0]),
-            windowIndex: windowIndex,
-            windowName: String(fields[2]),
-            paneID: String(fields[3]),
-            panePid: panePid,
-            paneTitle: String(fields[5]),
+            session: String(fields[0]), windowIndex: windowIndex, windowName: String(fields[2]),
+            paneID: String(fields[3]), panePid: panePid, paneTitle: String(fields[5]),
             currentCommand: String(fields[6]))
     }
 
-    /// Parse one `list-clients` line. The session name (which may contain
-    /// anything but a newline) is the tail field.
-    static func parseClientLine(_ line: String) -> TmuxClientInfo? {
+    nonisolated static func parseClientLine(_ line: String) -> TmuxClientInfo? {
         let fields = line.split(separator: "\t", maxSplits: 2, omittingEmptySubsequences: false)
         guard fields.count == 3, let pid = UInt32(fields[0]) else { return nil }
         return TmuxClientInfo(pid: pid, tty: String(fields[1]), session: String(fields[2]))
-    }
-
-    // MARK: - Subprocess plumbing
-
-    private struct SubprocessResult {
-        var exitCode: Int32
-        var stdout: String
-        var stderr: String
-    }
-
-    private static func runSubprocess(_ path: String, _ arguments: [String]) throws
-        -> SubprocessResult
-    {
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: path)
-        process.arguments = arguments
-        process.standardInput = FileHandle.nullDevice
-        // GUI apps launch without a UTF-8 locale; tmux then sanitizes tabs
-        // and non-ASCII characters in format output to "_", breaking both
-        // field splitting and pane titles.
-        var environment = ProcessInfo.processInfo.environment
-        let localeValues = [
-            environment["LC_ALL"], environment["LC_CTYPE"], environment["LANG"],
-        ].compactMap { $0 }
-        if !localeValues.contains(where: { $0.uppercased().contains("UTF-8") }) {
-            environment["LC_CTYPE"] = "en_US.UTF-8"
-        }
-        process.environment = environment
-        let stdoutPipe = Pipe()
-        let stderrPipe = Pipe()
-        process.standardOutput = stdoutPipe
-        process.standardError = stderrPipe
-
-        try process.run()
-        // Drain both pipes before waiting so large output cannot deadlock.
-        let stdoutData = stdoutPipe.fileHandleForReading.readDataToEndOfFile()
-        let stderrData = stderrPipe.fileHandleForReading.readDataToEndOfFile()
-        process.waitUntilExit()
-
-        return SubprocessResult(
-            exitCode: process.terminationStatus,
-            stdout: String(decoding: stdoutData, as: UTF8.self),
-            stderr: String(decoding: stderrData, as: UTF8.self))
     }
 }

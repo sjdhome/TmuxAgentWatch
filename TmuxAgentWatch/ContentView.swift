@@ -13,28 +13,31 @@ struct ContentView: View {
     @AppStorage("paneSortOrder") private var sortOrder: PaneSortOrder = .state
 
     var body: some View {
-        TimelineView(.periodic(from: .now, by: 1)) { context in
-            content(now: context.date)
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-        }
-        .navigationTitle("Tmux Agent Watch")
-        .navigationSubtitle(subtitle)
-        .toolbar {
-            ToolbarItem(placement: .primaryAction) {
-                Menu {
-                    Picker("Sort By", selection: $sortOrder) {
-                        Text("State").tag(PaneSortOrder.state)
-                        Text("Name").tag(PaneSortOrder.name)
+        content()
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .navigationTitle("Tmux Agent Watch")
+            .navigationSubtitle(subtitle)
+            .toolbar {
+                ToolbarItem(placement: .primaryAction) {
+                    Menu {
+                        Picker("Sort By", selection: $sortOrder) {
+                            Text("State").tag(PaneSortOrder.state)
+                            Text("Name").tag(PaneSortOrder.name)
+                        }
+                        .pickerStyle(.inline)
+                    } label: {
+                        Label("Sort", systemImage: "arrow.up.arrow.down")
                     }
-                    .pickerStyle(.inline)
-                } label: {
-                    Label("Sort", systemImage: "arrow.up.arrow.down")
+                    .help("Change how agents are sorted")
                 }
-                .help("Change how agents are sorted")
             }
-        }
-        .task { model.start() }
-        .onDisappear { model.stop() }
+            .task {
+                // Hosted tests must never inspect the user's real tmux server.
+                if ProcessInfo.processInfo.environment["TAW_DISABLE_SCANNING"] != "1" {
+                    model.start()
+                }
+            }
+            .onDisappear { model.stop() }
     }
 
     private var subtitle: String {
@@ -46,7 +49,7 @@ struct ContentView: View {
     }
 
     @ViewBuilder
-    private func content(now: Date) -> some View {
+    private func content() -> some View {
         switch model.snapshot {
         case nil:
             ProgressView("Scanning…")
@@ -64,21 +67,22 @@ struct ContentView: View {
                 Text("No tmux pane is currently running a known AI coding agent.")
             }
         case .tree(let sessions):
-            paneList(sessions, now: now)
+            paneList(sessions)
         }
     }
 
-    private func paneList(_ sessions: [SessionNode], now: Date) -> some View {
+    private func paneList(_ sessions: [SessionNode]) -> some View {
         let panes = sortPanes(flattenPanes(sessions), by: sortOrder)
         return List(selection: $selection) {
             ForEach(panes) { pane in
-                PaneRow(pane: pane, now: now)
+                PaneRow(pane: pane)
                     // Fix the row height so the alternating stripes drawn
                     // below the content share the same rhythm (they are
                     // sized by defaultMinListRowHeight, not by the rows).
                     .frame(height: PaneRow.rowHeight)
                     .listRowInsets(
-                        EdgeInsets(top: 0, leading: 12, bottom: 0, trailing: 12))
+                        EdgeInsets(top: 0, leading: 12, bottom: 0, trailing: 12)
+                    )
                     .accessibilityIdentifier("pane-row")
                     .tag(pane.id)
             }
@@ -118,7 +122,6 @@ private struct PaneRow: View {
     static let rowHeight: CGFloat = 44
 
     let pane: AgentPane
-    let now: Date
 
     var body: some View {
         HStack(spacing: 10) {
@@ -153,10 +156,7 @@ private struct PaneRow: View {
                 Text(stateName)
                     .fontWeight(pane.detection.state == .blocked ? .semibold : .regular)
                     .foregroundStyle(stateLabelStyle)
-                Text(formatStateDuration(now.timeIntervalSince(pane.stateSince)))
-                    .font(.caption)
-                    .monospacedDigit()
-                    .foregroundStyle(.secondary)
+                PaneElapsedTime(since: pane.stateSince)
             }
         }
         .accessibilityElement(children: .combine)
@@ -187,6 +187,21 @@ private struct PaneRow: View {
         case .blocked: return .red
         case .working: return .green
         case .idle, .unknown: return .secondary
+        }
+    }
+}
+
+/// Only the elapsed label depends on the clock. A tick must not rebuild or
+/// re-sort the list, or recompute every row's other labels.
+private struct PaneElapsedTime: View {
+    let since: Date
+
+    var body: some View {
+        TimelineView(.periodic(from: .now, by: 1)) { context in
+            Text(formatStateDuration(context.date.timeIntervalSince(since)))
+                .font(.caption)
+                .monospacedDigit()
+                .foregroundStyle(.secondary)
         }
     }
 }

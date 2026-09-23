@@ -9,7 +9,7 @@
 import Foundation
 
 /// A pane with a detected agent, carrying the debounced detection.
-nonisolated struct AgentPane: Sendable, Identifiable {
+nonisolated struct AgentPane: Sendable, Identifiable, Equatable {
     var info: PaneInfo
     var agent: Agent
     var detection: Detection
@@ -19,7 +19,7 @@ nonisolated struct AgentPane: Sendable, Identifiable {
     var id: String { info.paneID }
 }
 
-nonisolated struct WindowNode: Sendable, Identifiable {
+nonisolated struct WindowNode: Sendable, Identifiable, Equatable {
     var index: UInt32
     var name: String
     var panes: [AgentPane]
@@ -27,7 +27,7 @@ nonisolated struct WindowNode: Sendable, Identifiable {
     var id: UInt32 { index }
 }
 
-nonisolated struct SessionNode: Sendable, Identifiable {
+nonisolated struct SessionNode: Sendable, Identifiable, Equatable {
     var name: String
     var windows: [WindowNode]
 
@@ -35,7 +35,7 @@ nonisolated struct SessionNode: Sendable, Identifiable {
 }
 
 /// What one scan produced; the UI renders this without further tmux access.
-nonisolated enum Snapshot: Sendable {
+nonisolated enum Snapshot: Sendable, Equatable {
     case tmuxUnavailable(message: String)
     case tree([SessionNode])
 }
@@ -70,24 +70,35 @@ nonisolated enum Scanner {
     private static let piPermissionsRuleID = "pi_permissions_waiting"
 
     /// Run one scan with debounced states folded through the store.
-    static func scanDebounced(store: StateStore) -> Snapshot {
+    static func scanDebounced(
+        store: StateStore, client: TmuxClient,
+        identify: @Sendable (UInt32) -> (Agent, String)? = AgentIdentifier.identifyPaneAgent
+    ) async throws -> Snapshot {
         let panes: [PaneInfo]
-        switch TmuxClient.listPanes() {
+        switch try await client.listPanes() {
         case .failure(let unavailable):
             return .tmuxUnavailable(message: unavailable.message)
         case .success(let listed):
             panes = listed
         }
 
+        var identified: [(PaneInfo, Agent)] = []
+        for pane in panes {
+            try Task.checkCancellation()
+            if let (agent, _) = identify(pane.panePid) {
+                identified.append((pane, agent))
+            }
+        }
+        let screens = try await client.capturePanes(paneIDs: identified.map { $0.0.paneID })
+        try Task.checkCancellation()
         store.beginCycle()
 
         var agentPanes: [AgentPane] = []
-        for pane in panes {
-            guard let (agent, _) = AgentIdentifier.identifyPaneAgent(panePid: pane.panePid)
-            else { continue }
+        for (pane, agent) in identified {
             // Pane may vanish between list and capture; drop it for this cycle.
-            guard let rawScreen = TmuxClient.capturePane(paneID: pane.paneID) else { continue }
-            var detection = detectScreen(agent: agent, rawScreen: rawScreen, paneTitle: pane.paneTitle)
+            guard let rawScreen = screens[pane.paneID] else { continue }
+            var detection = detectScreen(
+                agent: agent, rawScreen: rawScreen, paneTitle: pane.paneTitle)
             let published = store.apply(paneID: pane.paneID, agent: agent, detection: detection)
             detection.state = published.state
             agentPanes.append(
@@ -130,7 +141,8 @@ nonisolated enum Scanner {
             return Detection(state: .blocked, ruleID: piAskUserRuleID, skip: false, visible: true)
         }
         if PiPermissions.isWaitingForUser(screen: screen) {
-            return Detection(state: .blocked, ruleID: piPermissionsRuleID, skip: false, visible: true)
+            return Detection(
+                state: .blocked, ruleID: piPermissionsRuleID, skip: false, visible: true)
         }
         return nil
     }

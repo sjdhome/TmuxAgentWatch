@@ -39,7 +39,7 @@ enum PaneJump {
         }
 
         let candidates = await Task.detached(priority: .userInitiated) {
-            TmuxClient.listClients()
+            await TmuxClient.listClients()
                 .filter { $0.session == session }
                 .map { (client: $0, chain: ancestry(of: $0.pid)) }
         }.value
@@ -63,7 +63,7 @@ enum PaneJump {
         let window = await locateWindow(of: app, clientTTY: client.tty)
 
         let switched = await Task.detached(priority: .userInitiated) {
-            TmuxClient.selectPane(paneID: paneID)
+            await TmuxClient.selectPane(paneID: paneID)
         }.value
         guard switched else {
             logger.error("select-pane failed for \(paneID, privacy: .public)")

@@ -52,8 +52,12 @@ formatting in every language.
 
 Next to the state, each row shows how long the pane has been in it,
 rendered with the system's localized duration formatting (`45s`, `1h 5m` in
-English), measured from the moment this app observed the state change. State changes appear within ~5 seconds (2s polling plus up to
-one debounce cycle). Apart from the double-click jump's `select-window` +
+English), measured from the moment this app observed the state change.
+The scanner waits 2 seconds **after** each completed scan; this is not a fixed
+2-second deadline. Established panes update on the next observation, with up to
+one extra confirming observation for Working→Idle. New panes retain the existing
+startup grace: the first two observations display idle. Apart from the
+double-click jump's `select-window` +
 `select-pane`, the app only reads from tmux (`list-panes`, `capture-pane`,
 `list-clients`) — it never writes to panes, sends input to agents, or
 touches their configs.
@@ -77,6 +81,64 @@ xcodebuild -project TmuxAgentWatch.xcodeproj -scheme TmuxAgentWatch \
 The app target has App Sandbox **disabled**: it must spawn the `tmux` binary
 and inspect other processes of the same user via `libproc`, neither of which
 a sandboxed app can do.
+
+The shared test scheme sets `TAW_DISABLE_SCANNING=1`: the hosted unit-test app
+does not scan the user's tmux server. Transport unit tests use synthetic results.
+The real tmux integration test is opt-in because it creates a temporary server;
+obtain permission before running it:
+
+```sh
+TEST_RUNNER_TAW_RUN_ISOLATED_TMUX_TESTS=1 xcodebuild \
+  -project TmuxAgentWatch.xcodeproj -scheme TmuxAgentWatch \
+  -destination 'platform=macOS' test -only-testing:TmuxAgentWatchTests
+```
+
+This uses a unique socket under `/tmp`, an empty tmux configuration, and synthetic
+pane content. It cleans up its own server on success and failure; fixture panes
+also expire after 30 seconds if the test host is interrupted. It never targets
+the user's socket. `TEST_RUNNER_` is required for forwarding the opt-in variable
+through xcodebuild; a build setting of the same name does not enable the test.
+The existing UI jump test still depends on real agent panes and is not part of
+these commands; running it requires separate permission for live tmux access.
+
+### Install Release in Applications
+
+Added on **2026-09-21 (Asia/Shanghai)** to install the optimized build without
+running it under Xcode's debugger:
+
+```sh
+./scripts/install-release.sh
+open "/Applications/Tmux Agent Watch.app"
+```
+
+Run the script as your normal user, from any working directory. First quit all
+copies of Tmux Agent Watch, including the Xcode run; the script refuses to install
+while one is running. It does not stop processes, launch the app, or access tmux.
+The `open` command above is a separate, optional step after successful installation.
+
+The script builds Release in
+`~/Library/Developer/Xcode/DerivedData/TmuxAgentWatch-ReleaseInstaller`, preserves
+the project's automatic signing settings, and verifies the built and staged
+bundles before replacing `/Applications/Tmux Agent Watch.app`. It honors
+`DEVELOPER_DIR`, otherwise uses the selected full Xcode or falls back to
+`/Applications/Xcode.app/Contents/Developer` without changing `xcode-select`.
+A usable signing identity for the project's team must already be configured;
+this is a local installation, not a notarized distribution workflow.
+
+Replacing an existing installation requires confirmation. Only installation
+commands request sudo when `/Applications` is not writable. The previous app is
+retained as `previous.app` inside a unique hidden
+`/Applications/.TmuxAgentWatch-install.*` directory, whose exact path is printed.
+If placement fails after moving the old app aside, the script attempts to restore
+it. Keep the backup until the new app works, then optionally remove that printed
+directory to reclaim space; elevated installs may require sudo for backup access.
+Backups are retained on each replacement, not automatically pruned. App settings
+are not deleted; macOS may ask you to reauthorize Accessibility after a signing
+change.
+
+Script validation: Bash syntax, ShellCheck, help/argument handling, and the
+missing-Xcode preflight are checked without installing or launching the app.
+Actual replacement and rollback have not been exercised against `/Applications`.
 
 ### Build warning cleanup
 
@@ -116,15 +178,74 @@ for the full design rationale):
    priority winner selection) bundled as `Resources/manifests.json`.
 4. **Debounce** (`Detect/StateStore.swift`) — Working→Idle needs two
    consecutive confirming polls unless the screen shows explicit idle
-   chrome; new panes get one cycle of startup grace; agent-owned viewer
-   screens keep the previous state. Transitions into/out of Blocked are
-   never delayed.
+   chrome; new panes display idle for their first two observations; agent-owned
+   viewer screens keep the previous state. After startup grace, transitions
+   into/out of Blocked are never delayed.
 
 One deliberate addition over the TUI: the tmux subprocess environment is
 forced to a UTF-8 `LC_CTYPE` when the app inherits none (GUI apps launch
 without one), because tmux otherwise sanitizes tabs and non-ASCII format
 output to `_`, breaking field parsing and pane titles
 (`TmuxClient.swift`).
+
+### Bounded batch polling
+
+Changed on **2026-09-21 (Asia/Shanghai)** after profiling showed substantial CPU
+charged to short-lived tmux children rather than the app's main process. The
+scanner formerly launched one discovery command plus one capture per agent pane.
+For N distinct agent panes, the normal path now launches
+`1 + ceil(N / 32)` children per scan (one child when N is zero). Only capture
+startup is amortized: tmux still reads every requested visible screen, and process
+identification still runs each scan. No detection rules or settings are migrated.
+
+- `TmuxClient.swift` batches `capture-pane -p` commands using **short-lived**
+  `tmux -N -C` invocations. It never runs `attach-session`, creates a session,
+  changes pane size/focus, or installs hooks. Unlike a resident attached control
+  client, it preserves detached-session lifecycle semantics. The protocol's
+  `%begin`/`%end`/`%error` blocks are parsed in `ControlModeOutput.swift`; see the
+  [tmux control-mode documentation](https://github.com/tmux/tmux/wiki/Control-Mode).
+- A missing pane aborts tmux's remaining command sequence. Completed results
+  are retained; only the unexecuted suffix is retried. Retries must consume a
+  target, so even a batch of vanished panes cannot loop forever. Vanished panes
+  retain the old drop-for-this-cycle behavior. Malformed/unsupported framing
+  switches that scanner instance to individual captures and logs one content-free
+  warning. This compatibility path costs the original per-pane startup overhead;
+  remove it only after establishing and testing a supported tmux baseline.
+- `SubprocessRunner.swift` drains both pipes concurrently with nonblocking read
+  sources. Each direct child has a 5-second deadline and an 8 MiB combined stdout/
+  stderr limit. Cancellation, timeout, or overflow terminates the child, escalates
+  to SIGKILL after 250 ms if necessary, and waits for reaping. The runner owns only
+  its direct child, not arbitrary descendant processes. Execution failures surface
+  as a scan error, not a fabricated idle screen; they do not trigger batch fallback.
+- `WatchModel.swift` cancels an in-flight scan when stopped, waits for its cleanup
+  before restarting, and rejects old-generation results. Equal snapshots are not
+  republished. `ContentView.swift` limits one-second clock updates to elapsed-time
+  labels instead of rebuilding and sorting the entire list.
+- `ProcessInspector.swift` derives argv and the effective process name from one
+  kernel buffer read, preserving partial argv[0] handling. No cross-scan identity
+  cache is used: foreground jobs, runtime titles, and reused PIDs remain fresh.
+
+The boundaries remain small: the scanner composes process identification,
+transport, detection, and the existing state store; only transport execution and
+identification have injection seams for tests. User-initiated pane jumps keep
+separate, infrequent commands and the existing behavior.
+
+Validation: the opt-in unit/integration command passed (180 tests, 391 runs
+including parameterized cases, no failures or skips), and the Release build
+succeeded. The pre-existing AppIntents metadata-extraction warning remains.
+
+Coverage and limitations: unit tests cover framing, bounded launch counts,
+failed-target recovery, compatibility fallback, concurrent pipe draining, output
+limits, cancellation/reaping, restart isolation, unchanged-snapshot publication,
+and shared argument parsing. The opt-in integration test compares batch and
+individual screens on a real isolated server, checks attached/detached hooks,
+client count, dimensions and active panes, and exercises transport through the
+scanner and debounce to a UI snapshot. Agent identification is synthetic in that
+test; it does not validate a live agent UI. Real-workload Release CPU and power
+comparison remains follow-up, not a measured improvement claim. Compare the app,
+its short-lived children **and the tmux server** under the same workload, with
+separate authorization for live pane access and power sampling; do not suspend an
+Xcode-debugged app to measure it.
 
 ## Regenerating the app icon
 
@@ -258,8 +379,9 @@ Validation: the documented Xcode unit-test command passed on Xcode 26.6
 Existing actor-isolation and Info.plist build warnings remain outside this sync.
 If `xcode-select` points at Command Line Tools, prefix the build/test commands
 with `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer` rather than
-changing the system-wide selection. Hosted unit tests may briefly run the
-app's normal read-only tmux scan; they do not validate live agent UI versions.
+changing the system-wide selection. At that baseline, hosted tests could briefly
+run the app's normal tmux scan; the current shared scheme disables that scan as
+described above. These tests do not validate live agent UI versions.
 
 ### Native Pi editor-status compatibility
 
