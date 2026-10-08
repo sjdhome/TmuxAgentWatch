@@ -1,5 +1,5 @@
 // Detection regressions ported from Herdr (Apache-2.0; see NOTICE). Sections
-// up to Muse track 4b5e9bda; the d59d0603 sync follows.
+// up to Muse track 4b5e9bda; the d59d0603 and 4dc23bb1 syncs follow.
 
 import Foundation
 import Testing
@@ -336,12 +336,6 @@ func grokTitleActivityRequiresASpinner(_ title: String, _ state: EngineState, _ 
     ("⠴ Sleep for 8 … 1.9s 5.0s ⇣19.5k [↓][stop]\n", "spinner_status_working"),
     ("Shift+Tab:mode │ Ctrl+c:cancel │ Ctrl+.:shortcuts\n", "esc_cancel_hints_working"),
     ("Shift+Tab:mode │ Esc:cancel │ Ctrl+.:shortcuts\n", "esc_cancel_hints_working"),
-    ("◎ 1 command still running\n", "background_status_working"),
-    ("○ 1 command still running\n", "background_status_working"),
-    (
-        "◎ 2 commands · 1 subagent still running · send a message to interrupt\n",
-        "background_status_working"
-    ),
 ])
 func grokVisibleActivityOutranksTheIdleTitle(_ screen: String, _ rule: String) {
     let detection = upstreamDetection(.grok, screen, title: "grok")
@@ -350,17 +344,6 @@ func grokVisibleActivityOutranksTheIdleTitle(_ screen: String, _ rule: String) {
 
     let blocked = upstreamDetection(.grok, screen, title: "⚠ Action Required - grok")
     #expect(blocked.state == .blocked)
-}
-
-@Test(arguments: [
-    "1 command still running\n",
-    "◎ 0 commands still running\n",
-    "Discussed: ◎ 1 command still running\n",
-    "◎ 1 command still running\n1\n2\n3\n4\n5\n6\n7\n8\n9\n10\n11\n12\n",
-    "Worked for 3.9s\nShift+Tab:mode │ Ctrl+.:shortcuts\n",
-])
-func grokBackgroundActivityRequiresALiveNonzeroStatusRow(_ screen: String) {
-    #expect(upstreamDetection(.grok, screen, title: "project · session").state == .idle)
 }
 
 // MARK: - Herdr d59d0603: Cline inline prompts and composer
@@ -416,4 +399,161 @@ func lettaAmbiguousScreensAreUnknown(_ screen: String, _ rule: String) {
     #expect(detection.state == .unknown)
     #expect(detection.ruleID == rule)
     #expect(!detection.skip)
+}
+
+// MARK: - Herdr 4dc23bb1: Codex remapped interrupt keys and reduced status
+
+@Test(arguments: [
+    "Working (4s • ctrl+c to interrupt)",
+    "• Working (1m 4s • esc esc to interrupt)",
+    "Working (4s)",
+    "◦ Fixing bug in queue region (2h 1m 4s) · 1 background terminal running",
+])
+func codexWorkingFallbackAcceptsAnyOrNoInterruptHint(_ status: String) {
+    let queue =
+        "• Messages to be submitted after next tool call\n  (press ctrl+c to interrupt and send immediately)\n  ↳ Keep waiting.\n"
+    for screen in [
+        "\(status)\n\n› Ask Codex to do anything\n",
+        "\(status)\n\(queue)\n› Ask Codex to do anything\n",
+    ] {
+        let detection = upstreamDetection(.codex, screen, title: "project")
+        #expect(detection.state == .working, "\(screen)")
+        #expect(detection.ruleID == "screen_working_fallback", "\(screen)")
+    }
+}
+
+@Test(arguments: [
+    "• Reconnect failed — check the endpoint, then relaunch (1m 2s)\n\n› Ask Codex to do anything\n",
+    "Working (4s)\n• Finished the task\n› Ask Codex to do anything\n",
+    "Working (4s)\n─ Worked for 4s ─\n› Ask Codex to do anything\n",
+    "Working (4 seconds)\n› Ask Codex to do anything\n",
+])
+func codexFailedReconnectAndStaleTimersAreNotWorking(_ screen: String) {
+    let detection = upstreamDetection(.codex, screen, title: "project")
+    #expect(detection.state == .idle, "\(screen)")
+    #expect(detection.ruleID != "screen_working_fallback")
+}
+
+@Test func codexMentionCompletionPopupIsBlocked() {
+    let popup = "› explain @src\n\n  All Results   Filesystem Only   Plugins\n  src/main.rs\n"
+    let detection = upstreamDetection(.codex, popup, title: "project")
+    #expect(detection.state == .blocked)
+    #expect(detection.ruleID == "live_strong_blocker")
+
+    // The tab labels must all be live below the current prompt.
+    let historical = "All Results   Filesystem Only   Plugins\n› next question\n"
+    #expect(upstreamDetection(.codex, historical, title: "project").state == .idle)
+}
+
+@Test(arguments: [
+    "Folder access\n\nTrust this folder?\nCodex can read, edit, and run files here.\n\n› 1. Trust and continue\n  2. Quit\n",
+    "> You are in /work/project\n\nTrust this folder?\nCodex can read, edit, and run files here.\n\nenter continue · esc quit\n",
+])
+func codexFolderAccessTrustPromptIsBlocked(_ screen: String) {
+    let detection = upstreamDetection(.codex, screen, title: "project")
+    #expect(detection.state == .blocked, "\(screen)")
+    #expect(detection.ruleID == "trust_directory", "\(screen)")
+}
+
+@Test func codexTrustTextWithoutTheDialogHeaderIsNotATrustPrompt() {
+    let screen =
+        "• Notes\nTrust this folder?\nCodex can read, edit, and run files here.\nTrust and continue\n› Ask Codex to do anything\n"
+    #expect(upstreamDetection(.codex, screen, title: "project").ruleID != "trust_directory")
+}
+
+// MARK: - Herdr 4dc23bb1: Grok background work at the prompt is idle
+
+@Test(arguments: [
+    "◎ 1 command still running\nShift+Tab:mode │ Ctrl+.:shortcuts\n",
+    "○ 2 commands · 1 subagent still running · send a message to interrupt\n",
+    "⋅ 2 │ grok · project\nShift+Tab:mode │ Ctrl+.:shortcuts\n",
+    "Worked for 3.9s\nShift+Tab:mode │ Ctrl+.:shortcuts\n",
+])
+func grokBackgroundWorkAtThePromptIsIdle(_ screen: String) {
+    for title in ["grok", "project · session"] {
+        let detection = upstreamDetection(.grok, screen, title: title)
+        #expect(detection.state == .idle, "\(title): \(screen)")
+    }
+}
+
+// MARK: - Herdr 4dc23bb1: Kiro live controls
+
+@Test(arguments: [
+    ("> Ask a question or describe a task ↵", "", EngineState.idle, "live_prompt_idle"),
+    (
+        "Allow write to src/main.rs?\n❯ Yes, single permission\n  Trust, always allow in this session\n  No (tab to edit)\nesc to close · ↑↓ to navigate · enter to select",
+        "", .blocked, "tool_approval"
+    ),
+    (
+        "Run shell command?\n❯ Allow\n  Always allow\n  Deny\n  Always deny\nesc to close · enter to see more options",
+        "", .blocked, "tool_approval"
+    ),
+    (
+        "────\nshell requires approval · modify request\n> rm -rf build\n────\nesc to close",
+        "", .blocked, "tool_approval_edit"
+    ),
+    (
+        "Tool approval needed for 2 subagents\n❯ Approve all pending\n  Configure individually (agent monitor)\n  Exit (cancel subagents)",
+        "", .blocked, "crew_approval"
+    ),
+    ("Which test suite?\n❯ unit\n  e2e\n↑↓ to navigate · enter to submit · esc to cancel", "", .blocked, "question_panel"),
+    ("⠹ Reading files\nKiro is working · type to steer · ctrl+s to queue", "", .working, "live_working_footer"),
+    ("transcript", "◐ kiro: project", .working, "osc_title_working"),
+])
+func kiroRecognizesLiveControls(
+    _ screen: String, _ title: String, _ state: EngineState, _ rule: String
+) {
+    let detection = upstreamDetection(.kiro, screen, title: title)
+    #expect(detection.state == state, "\(screen)")
+    #expect(detection.ruleID == rule, "\(screen)")
+    #expect(detection.visible)
+}
+
+@Test func kiroIdlePromptAboveTheLiveFooterWindowIsStale() {
+    // Idle outranks working, so it must be limited to the bottom four rows.
+    let screen =
+        "> Ask a question or describe a task\n1\n2\n3\n4\nKiro is working · type to steer · ctrl+s to queue"
+    #expect(upstreamDetection(.kiro, screen).ruleID == "live_working_footer")
+}
+
+@Test(arguments: [
+    "Kiro is working · type to steer · ctrl+s to queue\n1\n2\n3\n4\n",
+    "Allow\nDeny\nesc to close · ↑↓ to navigate\nmore output after the dialog\n",
+    "\"↑↓ to navigate · enter to submit · esc to cancel\"\n1\n2\n3\n4\n5\n6\n7\n8\n",
+])
+func kiroHistoricalControlsAreNotLive(_ screen: String) {
+    let detection = upstreamDetection(.kiro, screen)
+    #expect(detection.state == .idle, "\(screen)")
+    #expect(detection.ruleID == nil, "\(screen)")
+}
+
+// MARK: - Herdr 4dc23bb1: agy dialogs and mid-turn work
+
+@Test(arguments: [
+    ("Edit src/main.rs\n↑/↓ Navigate · tab Amend · f full diff\nesc to cancel", EngineState.blocked, "permission_prompt"),
+    ("Run ls?\n↑/↓ Navigate · tab Amend · ctrl+g edit/expand command\nesc to cancel", .blocked, "permission_prompt"),
+    ("Which branch?\n↑/↓ Navigate · enter Select · esc Skip\nesc to cancel", .blocked, "question_prompt"),
+    (
+        "Do you trust the contents of this project?\n❯ Yes, I trust this folder\n  No, exit\n↑/↓ Navigate · enter Confirm",
+        .blocked, "trust_prompt"
+    ),
+    ("──────────\n >\n──────────\n esc to cancel", .working, "esc_cancel_footer_working"),
+    ("⠋ Investigating the failing test\n──────────\n >\n──────────\n? for shortcuts", .working, "spinner_working"),
+    ("⠙ Weighing two approaches to caching\n\n──────────\n >\n──────────\n? for shortcuts", .working, "spinner_working"),
+])
+func agyRecognizesDialogsAndMidTurnWork(_ screen: String, _ state: EngineState, _ rule: String) {
+    let detection = upstreamDetection(.antigravity, screen)
+    #expect(detection.state == state, "\(screen)")
+    #expect(detection.ruleID == rule, "\(screen)")
+    #expect(detection.visible)
+}
+
+@Test(arguments: [
+    "──────────\n > /he\n──────────\n/help\n↑/↓ Navigate · enter Select · tab Complete",
+    "Done.\n──────────\n >\n──────────\n? for shortcuts · 2 tasks\n  ▸ task: npm run dev",
+    "Done.\n──────────\n >\n──────────\n? for shortcuts",
+])
+func agyIdlePromptWithMenusOrBackgroundTasksIsIdle(_ screen: String) {
+    let detection = upstreamDetection(.antigravity, screen)
+    #expect(detection.state == .idle, "\(screen)")
 }

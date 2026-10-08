@@ -294,6 +294,69 @@ from herdr's `src/detect/mod.rs`.
 
 ### Upstream sync baseline
 
+Synced on **2026-10-08 (Asia/Shanghai)** to Herdr
+[`4dc23bb15d4a2fd2c093abfb509f903c3015bf56`](https://github.com/ogulcancelik/herdr/commit/4dc23bb15d4a2fd2c093abfb509f903c3015bf56),
+from `d59d0603`. Its detection sources match the last detection change,
+`950d012c`. Recognition changes:
+
+- Kiro reads live controls instead of transcript text: the bottom-row prompt
+  is idle; complete tool approval menus (every option of the variant must be
+  visible, since `line_regex` lists require all patterns), the edit-request
+  dialog, crew approval, and question panels are blocked; the live footer and
+  a spinner `kiro:` title are working. Idle outranks working, so the prompt
+  rule only reads the bottom four rows.
+- agy recognizes its permission, question, and trust dialogs from the footer
+  hint rows, and mid-turn work from a braille spinner row or the
+  `esc to cancel` footer under the prompt border. The slash menu stays idle.
+- **Behavior change:** Grok and agy no longer report working for background
+  commands, monitors, subagents, or tasks left running at the prompt, matching
+  Claude. Grok's `background_work_chip_working` and
+  `background_status_working` rules were removed upstream.
+- Codex accepts remapped, unbound, or hidden interrupt hints (`(4s)`,
+  `(4s • ctrl+c to interrupt)`), rejects a failed reconnect's frozen timer,
+  treats the `@` mention completion popup as a live blocker, and recognizes
+  the new Folder access trust dialog. Upstream's interim Codex `unknown`
+  fallback (`9c96f7dd`) was reverted in `07e3840b`; this engine always used
+  the known-agent idle fallback, so no engine change was needed.
+- Hermes is identified when launched by its installer bootstrap,
+  `python -I -c <bootstrap> [args…]`. Only the captured bootstrap text
+  matches, with one installation root used consistently and free of quotes,
+  backslashes, and line breaks; `--run-module` and `--print-runtime-command`
+  helpers are rejected. A changed bootstrap falls back to ordinary
+  identification.
+- omp is identified from `node_modules/@oh-my-pi/pi-coding-agent/dist/cli.js`.
+- Pi's manifest gained a standalone `⠋ Working` line. It stays bundled but
+  unevaluated: the full-screen `Working...` literal remains, and the native
+  shim below still covers more layouts.
+
+Also ported from before the previous baseline: the
+`node_modules/mastracode/dist/cli` package path. Cursor's bundled-node
+launcher is **not** ported: upstream matches only `node.exe` (`9d7b6c24`), so
+it does not apply on macOS.
+
+Not ported: `950d012c` keeps Herdr sessions for agents suspended (Ctrl-Z) or
+backgrounded. Here such a pane's foreground job is the shell, so its row
+disappears until the agent returns to the foreground. Porting it requires
+process-state inspection and a decision on how to show suspended agents.
+Agent resume commands, hook handoff, removal of the unused
+`should_skip_state_update` helper, and Windows-only changes are out of scope.
+
+No settings migration is needed. The manifest engine remains version 3;
+polling, debounce, and Pi precedence are unchanged. Kiro's
+`osc_progress_working` never matches because tmux exposes no OSC 9;4 progress;
+its title and screen rules carry detection.
+
+Validation: the documented Xcode unit-test command passed on Xcode 27.0
+(macOS 27.0.1): 213 tests, 212 passed and the opt-in isolated-tmux test
+skipped, 511 runs including parameterized cases. The `4dc23bb1` sections of
+`UpstreamDetectionTests.swift` and `AgentIdentifierTests.swift` cover these
+changes and their negative cases. Upstream ships no Kiro, agy, or new Codex
+screen tests, so those screens are synthetic, written from the manifest rules
+and comments, and are not validated against live agent UIs. The Hermes cases
+reuse upstream's redacted #4910 process capture.
+
+#### Previous sync (d59d0603)
+
 Synced on **2026-09-20 (Asia/Shanghai)** to Herdr
 [`d59d0603d53bb88c5320ea508a4fb9858b61af68`](https://github.com/ogulcancelik/herdr/commit/d59d0603d53bb88c5320ea508a4fb9858b61af68),
 from `4b5e9bda`, to incorporate upstream recognition fixes:
@@ -315,7 +378,8 @@ from `4b5e9bda`, to incorporate upstream recognition fixes:
 - Grok no longer treats any non-idle title as working: the title needs a
   braille spinner, since title items are configurable. Visible spinner rows,
   `esc:cancel` / `ctrl+c:cancel` hints, and the 1.0.34 `N commands still
-  running` status row outrank the idle title.
+  running` status row outrank the idle title. (The status row rule was
+  removed in `4dc23bb1`.)
 - Cline recognizes inline tool approvals and questions, the active-turn
   spinner, and the idle composer. Its `.cline` native binary and
   `node …/cline` launchers are identified; the latter uses the same script
@@ -337,7 +401,8 @@ each) finished within 10 ms.
 
 Not part of this sync, and still unported from before the previous baseline:
 the `node_modules/mastracode/dist/cli` package path and Cursor's bundled-node
-launcher. Windows-only launcher handling (`cmd`, PowerShell) is out of scope.
+launcher (both resolved in the `4dc23bb1` sync). Windows-only launcher handling
+(`cmd`, PowerShell) is out of scope.
 
 Validation: the documented Xcode unit-test command passed on Xcode 27.0
 (macOS 26.6.2): 147 tests, 331 runs including parameterized cases, no failures.
@@ -347,7 +412,7 @@ Letta identification cases. Upstream ships no Letta or Cline screen tests, so
 those screens are synthetic, written from the manifest rules, and are not
 validated against live agent UIs.
 
-#### Previous sync
+#### Earlier sync (4b5e9bda)
 
 Synced on **2026-09-07 (Asia/Shanghai)** to Herdr
 [`4b5e9bda239a0b6903889062d756424578e94691`](https://github.com/ogulcancelik/herdr/commit/4b5e9bda239a0b6903889062d756424578e94691),

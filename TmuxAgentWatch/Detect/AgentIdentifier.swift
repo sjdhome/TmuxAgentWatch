@@ -113,13 +113,80 @@ nonisolated enum AgentIdentifier {
         case "node", "bun":
             return scriptArgAgentName(argv, evalFlags: ["-e", "--eval", "-p", "--print"], moduleFlags: [])
         case let name where isPythonRuntime(name):
-            return scriptArgAgentName(argv, evalFlags: ["-c"], moduleFlags: ["-m"])
+            return hermesInstallerAgentName(argv)
+                ?? scriptArgAgentName(argv, evalFlags: ["-c"], moduleFlags: ["-m"])
         case "sh", "bash", "zsh", "fish":
             return scriptArgAgentName(argv, evalFlags: ["-c"], moduleFlags: [])
         default:
             return nil
         }
     }
+
+    // MARK: - Hermes installer bootstrap
+
+    /// Hermes' installer launches `python -I -c <bootstrap> [args…]`. Recognize
+    /// only that captured bootstrap, not arbitrary Python source: both root
+    /// literals must agree, and quotes or escapes are rejected rather than
+    /// parsed. Helper modes run other modules and are not the agent.
+    static func hermesInstallerAgentName(_ argv: [String]) -> String? {
+        guard argv.count >= 4, argv[1] == "-I", argv[2] == "-c" else { return nil }
+        if let mode = argv.dropFirst(4).first,
+            mode == "--run-module" || mode == "--print-runtime-command"
+        {
+            return nil
+        }
+
+        let code = argv[3]
+        guard code.hasPrefix(hermesInstallerPrefix) else { return nil }
+        let rest = code.dropFirst(hermesInstallerPrefix.count)
+        guard let rootEnd = rest.range(of: "')\n") else { return nil }
+        let root = rest[..<rootEnd.lowerBound]
+        // Scalars, not Characters: "\r\n" is one grapheme and would slip past.
+        let forbidden = "'\\\n\r".unicodeScalars
+        if root.isEmpty || root.unicodeScalars.contains(where: forbidden.contains) {
+            return nil
+        }
+        let tail = rest[rootEnd.upperBound...]
+        guard tail.hasPrefix(hermesInstallerMiddle) else { return nil }
+        let afterMiddle = tail.dropFirst(hermesInstallerMiddle.count)
+        guard afterMiddle.hasPrefix(root) else { return nil }
+        return afterMiddle.dropFirst(root.count) == hermesInstallerSuffix
+            ? Agent.hermes.label : nil
+    }
+
+    // Installer source captured in herdr #4910. Only the installation root
+    // varies; unknown bootstrap revisions fall back to ordinary identification.
+    private static let hermesInstallerPrefix = """
+        import os, re, sys
+        os.environ.pop('PYTHONHOME', None)
+        os.environ.pop('PYTHONPATH', None)
+        sys.path.insert(0, '
+        """
+    private static let hermesInstallerMiddle = """
+        if sys.argv[1:2] == ['--print-runtime-command']: sys.dont_write_bytecode = True
+        from hermes_constants import get_default_hermes_root
+        os.environ['HERMES_HOME'] = os.environ.get('HERMES_HOME') or str(get_default_hermes_root())
+        if sys.argv[1:2] == ['--print-runtime-command']:
+            from pathlib import Path
+            from hermes_cli._launchers import print_runtime_command
+            print_runtime_command(Path('
+        """
+    private static let hermesInstallerSuffix = #"""
+        '), sys.argv[2:])
+            sys.exit(0)
+        import hermes_bootstrap
+        if sys.argv[1:2] == ['--run-module']:
+            import runpy
+            if len(sys.argv) < 3: sys.exit('hermes: --run-module needs a module')
+            module = sys.argv.pop(2)
+            del sys.argv[1]
+            runpy.run_module(module, run_name='__main__', alter_sys=True)
+            sys.exit(0)
+        from hermes_cli.main import main
+        sys.argv[0] = re.sub(r'(-script\.pyw|\.exe)?$', '', sys.argv[0])
+        sys.exit(main())
+
+        """#
 
     private static func scriptArgAgentName(
         _ argv: [String], evalFlags: [String], moduleFlags: [String]
@@ -201,6 +268,10 @@ nonisolated enum AgentIdentifier {
         {
             return Agent.pi.label
         }
+        let ompEntrypoint = ["node_modules", "@oh-my-pi", "pi-coding-agent", "dist", "cli.js"]
+        if rawComponents.suffix(ompEntrypoint.count).elementsEqual(ompEntrypoint) {
+            return Agent.omp.label
+        }
         let kimiEntrypoint = ["node_modules", "@moonshot-ai", "kimi-code", "dist", "main.mjs"]
         if rawComponents.suffix(kimiEntrypoint.count).elementsEqual(kimiEntrypoint) {
             return Agent.kimi.label
@@ -209,6 +280,7 @@ nonisolated enum AgentIdentifier {
         let components = rawComponents.map(normalizedAgentLookupName)
         let needles: [(needle: [String], agent: Agent)] = [
             (["node_modules", "@qwen-code", "qwen-code", "dist", "index"], .qwen),
+            (["node_modules", "mastracode", "dist", "cli"], .mastracode),
             (["node_modules", "@letta-ai", "letta-code", "letta"], .letta),
         ]
 

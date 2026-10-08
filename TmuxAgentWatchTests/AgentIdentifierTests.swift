@@ -319,6 +319,167 @@ func unrelatedLettaMentionsAreIgnored(_ argv: [String]) {
     #expect(AgentIdentifier.identifyAgent(in: job) == nil)
 }
 
+// MARK: - Herdr 4dc23bb1 identification regressions
+
+// Kept independent of the production constants so the tests check them.
+private let hermesInstallerRoot = "/Users/REDACTED/.hermes/hermes-agent"
+private let hermesInstallerCode = #"""
+    import os, re, sys
+    os.environ.pop('PYTHONHOME', None)
+    os.environ.pop('PYTHONPATH', None)
+    sys.path.insert(0, '/Users/REDACTED/.hermes/hermes-agent')
+    if sys.argv[1:2] == ['--print-runtime-command']: sys.dont_write_bytecode = True
+    from hermes_constants import get_default_hermes_root
+    os.environ['HERMES_HOME'] = os.environ.get('HERMES_HOME') or str(get_default_hermes_root())
+    if sys.argv[1:2] == ['--print-runtime-command']:
+        from pathlib import Path
+        from hermes_cli._launchers import print_runtime_command
+        print_runtime_command(Path('/Users/REDACTED/.hermes/hermes-agent'), sys.argv[2:])
+        sys.exit(0)
+    import hermes_bootstrap
+    if sys.argv[1:2] == ['--run-module']:
+        import runpy
+        if len(sys.argv) < 3: sys.exit('hermes: --run-module needs a module')
+        module = sys.argv.pop(2)
+        del sys.argv[1]
+        runpy.run_module(module, run_name='__main__', alter_sys=True)
+        sys.exit(0)
+    from hermes_cli.main import main
+    sys.argv[0] = re.sub(r'(-script\.pyw|\.exe)?$', '', sys.argv[0])
+    sys.exit(main())
+
+    """#
+
+private let hermesPython =
+    "/Users/REDACTED/.hermes/tools/python-3.14.7+20260901-darwin-arm64/bin/python3"
+
+/// The process layout captured in herdr #4910: the installer bootstrap leads
+/// the group, with its TUI gateway and node frontend as other members.
+private func hermesInstallerJob(
+    code: String = hermesInstallerCode,
+    args: [String] = ["--profile", "sdlc-planner", "--skills", "grill-with-docs"]
+) -> ForegroundJob {
+    func process(_ pid: UInt32, _ name: String, _ argv: [String]) -> ForegroundProcess {
+        let argv0 = name == "node" ? "node" : "python3"
+        return ForegroundProcess(
+            pid: pid, name: name, argv0: argv0, argv: argv, cmdline: argv.joined(separator: " "))
+    }
+    return ForegroundJob(
+        processGroupID: 30455,
+        processes: [
+            process(30781, "python3.14", [hermesPython, "-m", "tui_gateway.entry"]),
+            process(
+                30778, "node",
+                [
+                    "/Users/REDACTED/.hermes/tools/node-26.7.0-darwin-arm64/bin/node",
+                    "--expose-gc", "/Users/REDACTED/.hermes/hermes-agent/ui-tui/dist/entry.js",
+                ]),
+            process(30455, "python3.14", [hermesPython, "-I", "-c", code] + args),
+        ])
+}
+
+@Test func hermesInstallerCaptureIsDetected() {
+    var job = hermesInstallerJob()
+    let found = AgentIdentifier.identifyAgent(in: job)
+    #expect(found?.0 == .hermes)
+    #expect(found?.1 == "hermes")
+    // Leader-only jobs must take the same path.
+    job.processes.removeAll { $0.pid != job.processGroupID }
+    #expect(AgentIdentifier.identifyAgent(in: job)?.0 == .hermes)
+}
+
+@Test func hermesInstallerAllowsAnotherInstallRoot() {
+    let code = hermesInstallerCode.replacingOccurrences(
+        of: hermesInstallerRoot, with: "/opt/another install/hermes-agent")
+    #expect(AgentIdentifier.identifyAgent(in: hermesInstallerJob(code: code))?.0 == .hermes)
+}
+
+@Test(arguments: ["--run-module", "--print-runtime-command"])
+func hermesInstallerHelperModesAreIgnored(_ mode: String) {
+    let job = hermesInstallerJob(args: [mode, "tui_gateway.entry"])
+    #expect(AgentIdentifier.identifyAgent(in: job) == nil)
+}
+
+@Test(arguments: [
+    "print('hermes_cli.main')",
+    "'''\(hermesInstallerCode)'''",
+    hermesInstallerCode.split(separator: "\n", omittingEmptySubsequences: false)
+        .map { "# \($0)\n" }.joined(),
+    hermesInstallerCode.replacingOccurrences(of: "/Users/REDACTED", with: "/Users/has'quote"),
+    hermesInstallerCode.replacingOccurrences(of: "/Users/REDACTED", with: #"/Users/has\escape"#),
+    hermesInstallerCode.replacingOccurrences(of: "/Users/REDACTED", with: "/Users/has\r\nbreak"),
+    hermesInstallerCode.replacingOccurrences(
+        of: "/Users/REDACTED", with: "/different/root",
+        range: hermesInstallerCode.range(of: "/Users/REDACTED")),
+])
+func hermesInstallerRejectsIncidentalSourceAndUnsafeRoots(_ code: String) {
+    #expect(AgentIdentifier.hermesInstallerAgentName([hermesPython, "-I", "-c", code]) == nil)
+}
+
+@Test(arguments: [
+    ["python3", "-m", "module"],
+    ["python3", "--", "script.py"],
+    ["python3", "script.py"],
+    ["bash", "-I"],
+])
+func hermesSourceOutsideTheInstallerInvocationIsIgnored(_ prefix: [String]) {
+    let argv = prefix + ["-c", hermesInstallerCode]
+    let job = ForegroundJob(
+        processGroupID: 123, processes: [foregroundProcess(123, prefix[0], argv)])
+    #expect(AgentIdentifier.identifyAgent(in: job) == nil, "\(prefix)")
+}
+
+@Test(arguments: [
+    ["bun", "/usr/local/lib/node_modules/@oh-my-pi/pi-coding-agent/dist/cli.js"],
+    ["node", "/opt/NODE_MODULES/@OH-MY-PI/PI-CODING-AGENT/DIST/CLI.JS"],
+    [
+        "bun.exe",
+        #"C:\Users\user\AppData\Roaming\npm\node_modules\@oh-my-pi\pi-coding-agent\dist\cli.js"#,
+    ],
+])
+func ompPackageEntrypointIsDetected(_ argv: [String]) {
+    let job = ForegroundJob(
+        processGroupID: 123, processes: [foregroundProcess(123, argv[0], argv)])
+    let found = AgentIdentifier.identifyAgent(in: job)
+    #expect(found?.0 == .omp)
+    #expect(found?.1 == "omp")
+}
+
+@Test(arguments: [
+    "/tmp/node_modules/@oh-my-pi/pi-coding-agent/dist/setup.js",
+    "/tmp/node_modules/@oh-my-pi/pi-coding-agent/dist/cli.js/other.js",
+    "/tmp/node_modules/@oh-my-pi/other-package/dist/cli.js",
+])
+func nonEntrypointOmpPathsAreIgnored(_ script: String) {
+    let job = ForegroundJob(
+        processGroupID: 123, processes: [foregroundProcess(123, "bun", ["bun", script])])
+    #expect(AgentIdentifier.identifyAgent(in: job) == nil)
+}
+
+// Herdr matches this package window since before d59d0603; ported now.
+@Test(arguments: [
+    "/usr/local/lib/node_modules/mastracode/dist/cli.js",
+    "/usr/local/lib/node_modules/mastracode/dist/cli/index.js",
+])
+func mastracodePackageEntrypointIsDetected(_ script: String) {
+    let job = ForegroundJob(
+        processGroupID: 123, processes: [foregroundProcess(123, "node", ["node", script])])
+    let found = AgentIdentifier.identifyAgent(in: job)
+    #expect(found?.0 == .mastracode, "\(script)")
+    #expect(found?.1 == "mastracode", "\(script)")
+}
+
+@Test(arguments: [
+    "/tmp/node_modules/mastracode/dist/worker.js",
+    "/tmp/node_modules/mastracode/lib/cli.js",
+    "/tmp/src/mastracode/dist/cli.js",
+])
+func nonEntrypointMastracodePathsAreIgnored(_ script: String) {
+    let job = ForegroundJob(
+        processGroupID: 123, processes: [foregroundProcess(123, "node", ["node", script])])
+    #expect(AgentIdentifier.identifyAgent(in: job) == nil)
+}
+
 // MARK: - KERN_PROCARGS2 parsing
 
 private func procargs2Buffer(_ argc: Int32, _ execPath: String, _ strings: [String]) -> [UInt8] {
