@@ -294,6 +294,47 @@ from herdr's `src/detect/mod.rs`.
 
 ### Upstream sync baseline
 
+Synced on **2026-10-15 (Asia/Shanghai)** to Herdr
+[`916fcf8de029c6cac965b50f3cdb9687cd7d1537`](https://github.com/ogulcancelik/herdr/commit/916fcf8de029c6cac965b50f3cdb9687cd7d1537),
+from `4dc23bb1`. Its detection sources match the last detection change,
+`9c38bbc6`. Only two bundled manifests changed; the engine, identification
+(`src/detect/mod.rs`), and the other 20 manifests are unchanged upstream.
+
+- Claude recognizes blocked forms in named sessions (`9c38bbc6`, #4573). A
+  session name draws a divider below the form footer, so
+  `live_blocked_form`, which reads after the last horizontal rule, missed
+  them. The new `live_blocked_form_named_session` rule requires the complete
+  footer (confirm, or select plus a navigation hint, then cancel; wrapping
+  between words is allowed), only blank rows before the divider, and after it
+  at most a counted task panel with marked rows and an optional
+  `… +N pending` row. Any other newer output makes the form historical.
+- Codex recognizes the shared update picker of Codex 0.159+ (`6d697e1e`,
+  #4811): an `Update available ·` heading at line start plus an
+  `enter continue · esc skip` footer at the bottom. The legacy dialog is kept
+  as the first alternative of the same `startup_update` rule; a passive update
+  notice has no picker footer and stays unmatched.
+
+Upstream's other changes since `4dc23bb1` are out of scope: shell-detection
+text reuse (`cce57bc3`, `fe935882`) is a Herdr pane-runtime optimization,
+macOS restart session saving (`642134ac`) is Herdr session management, and
+the rest concern remote connections, input handling, and Windows. The
+`950d012c` suspended-agent retention noted below remains unported.
+
+No settings migration is needed. The manifest engine remains version 3;
+polling, debounce, and Pi precedence are unchanged.
+
+Validation: the documented Xcode unit-test command passed on Xcode 27.0:
+218 tests, 217 passed and the opt-in isolated-tmux test skipped, 531 runs
+including parameterized cases. The `916fcf8d` sections of
+`UpstreamDetectionTests.swift` cover both rules and their negative cases.
+Upstream's new tests exercise synthetic manifests rather than real screens,
+so the Claude and Codex screens here are synthetic, written from the
+manifest rules and comments, and are not validated against live agent UIs.
+The converter needs Python 3.11+ (`tomllib`); where `python3` is older, run
+it through `uv run --no-project --python '>=3.11' python`.
+
+#### Previous sync (4dc23bb1)
+
 Synced on **2026-10-08 (Asia/Shanghai)** to Herdr
 [`4dc23bb15d4a2fd2c093abfb509f903c3015bf56`](https://github.com/ogulcancelik/herdr/commit/4dc23bb15d4a2fd2c093abfb509f903c3015bf56),
 from `d59d0603`. Its detection sources match the last detection change,
@@ -355,7 +396,7 @@ screen tests, so those screens are synthetic, written from the manifest rules
 and comments, and are not validated against live agent UIs. The Hermes cases
 reuse upstream's redacted #4910 process capture.
 
-#### Previous sync (d59d0603)
+#### Earlier sync (d59d0603)
 
 Synced on **2026-09-20 (Asia/Shanghai)** to Herdr
 [`d59d0603d53bb88c5320ea508a4fb9858b61af68`](https://github.com/ogulcancelik/herdr/commit/d59d0603d53bb88c5320ea508a4fb9858b61af68),

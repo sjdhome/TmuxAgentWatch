@@ -402,6 +402,16 @@
     ]
    },
    {
+    "id": "live_blocked_form_named_session",
+    "state": "blocked",
+    "priority": 980,
+    "region": "whole_recent",
+    "visible_blocker": true,
+    "regex": [
+     "(?i)(?:^|\\n)[ \\t]*enter\\s+to\\s+(?:confirm|select\\s+·\\s+(?:(?:tab/arrow|arrow)\\s+keys|arrows|↑/↓|↑↓)\\s+to\\s+navigate)\\s+·\\s+esc\\s+to\\s+cancel[ \\t]*\\n(?:[ \\t]*\\n)*[ \\t]*─{3,}[^\\n]*(?:\\n(?:[ \\t]*\\n)*[ \\t]+\\d+ tasks? \\(\\d+ done, (?:\\d+ in progress, )?\\d+ open\\)(?:\\n[ \\t]+[◻◼✔][ \\t]+[^\\n]+)+(?:\\n[ \\t]+…[ \\t]+\\+\\d+[ \\t]+pending)?)?(?:\\n[ \\t]*)*\\z"
+    ]
+   },
+   {
     "id": "dynamic_workflow_prompt",
     "state": "blocked",
     "priority": 980,
@@ -944,13 +954,37 @@
     "priority": 950,
     "region": "bottom_non_empty_lines(20)",
     "visible_blocker": true,
-    "contains": [
-     "Update available!",
-     "Update now"
-    ],
-    "regex": [
-     "Skip\\s+until\\s+next\\s+version",
-     "Press enter to continue\\s*\\z"
+    "any": [
+     {
+      "all": [
+       {
+        "contains": [
+         "Update available!",
+         "Update now"
+        ]
+       },
+       {
+        "regex": [
+         "Skip\\s+until\\s+next\\s+version",
+         "Press enter to continue\\s*\\z"
+        ]
+       }
+      ]
+     },
+     {
+      "all": [
+       {
+        "regex": [
+         "(?m)^\\s*Update\\s+available\\s+·"
+        ]
+       },
+       {
+        "regex": [
+         "enter\\s+continue\\s+·\\s+esc\\s+skip\\s*\\z"
+        ]
+       }
+      ]
+     }
     ]
    },
    {

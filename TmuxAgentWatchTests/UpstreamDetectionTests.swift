@@ -1,5 +1,5 @@
 // Detection regressions ported from Herdr (Apache-2.0; see NOTICE). Sections
-// up to Muse track 4b5e9bda; the d59d0603 and 4dc23bb1 syncs follow.
+// up to Muse track 4b5e9bda; the d59d0603, 4dc23bb1, and 916fcf8d syncs follow.
 
 import Foundation
 import Testing
@@ -556,4 +556,87 @@ func agyRecognizesDialogsAndMidTurnWork(_ screen: String, _ state: EngineState, 
 func agyIdlePromptWithMenusOrBackgroundTasksIsIdle(_ screen: String) {
     let detection = upstreamDetection(.antigravity, screen)
     #expect(detection.state == .idle, "\(screen)")
+}
+
+// MARK: - Herdr 916fcf8d: Claude blocked forms above a named-session divider
+
+private let claudeNamedSessionDivider = "──────────────────────────── refactor-auth ──"
+
+@Test(arguments: [
+    "Which approach?\n❯ 1. Extract a helper\n  2. Inline it\nEnter to select · ↑/↓ to navigate · Esc to cancel\n",
+    "Apply this change?\nEnter to confirm · Esc to cancel   \n\n",
+    "Pick one\nEnter to select ·\narrow keys to navigate · Esc to\ncancel\n",
+])
+func claudeBlockedFormAboveNamedSessionDividerIsBlocked(_ form: String) {
+    for tail in [
+        "",
+        "\n  5 tasks (1 done, 1 in progress, 3 open)\n  ◼ Write tests\n  ✔ Read the code\n  ◻ Ship",
+        "\n\n  4 tasks (2 done, 2 open)\n  ◻ Review\n  … +3 pending\n  ",
+    ] {
+        let screen = "Earlier output\n" + form + claudeNamedSessionDivider + tail
+        let detection = upstreamDetection(.claude, screen)
+        #expect(detection.state == .blocked, "\(screen)")
+        #expect(detection.ruleID == "live_blocked_form_named_session", "\(screen)")
+        #expect(detection.visible, "\(screen)")
+    }
+}
+
+@Test(arguments: [
+    // Newer output or free-form activity after the divider makes the form historical.
+    "\nDone.",
+    "\n  2 tasks (1 done, 1 open)\n  ◻ Ship\n  ✻ Working…",
+    "\n  2 tasks (1 done, 1 open)\n  ◻ Ship\n\n> continue",
+    // An incomplete task panel is not the accepted auxiliary tail.
+    "\n  2 tasks (1 done, 1 open)",
+    "\n  … +2 pending",
+])
+func claudeNamedSessionFormFollowedByNewerContentIsNotBlocked(_ tail: String) {
+    let screen = "Pick one\nEnter to select · ↑/↓ to navigate · Esc to cancel\n"
+        + claudeNamedSessionDivider + tail
+    let detection = upstreamDetection(.claude, screen)
+    #expect(detection.ruleID != "live_blocked_form_named_session", "\(screen)")
+    #expect(detection.state != .blocked, "\(screen)")
+}
+
+@Test(arguments: [
+    "Enter to select · Esc to cancel",
+    "Enter to select · ↑/↓ to navigate",
+    "Enter to select · page keys to navigate · Esc to cancel",
+    "\"Enter to confirm · Esc to cancel\" was the old footer",
+    // Only blank rows may separate the footer from the divider.
+    "Enter to select · ↑/↓ to navigate · Esc to cancel\n  3 tasks (1 done, 1 in progress, 1 open)",
+])
+func claudeNamedSessionDividerNeedsTheCompleteFooter(_ footer: String) {
+    let screen = "Pick one\n" + footer + "\n" + claudeNamedSessionDivider
+    let detection = upstreamDetection(.claude, screen)
+    #expect(detection.ruleID != "live_blocked_form_named_session", "\(screen)")
+}
+
+// MARK: - Herdr 916fcf8d: Codex shared update picker (0.159+)
+
+@Test(arguments: [
+    "  Update available · 0.158.0 → 0.159.0\n› 1. Update now\n  2. Skip\n  3. Skip until next version\n  enter continue · esc skip\n",
+    // Choices may scroll out of a short viewport; both gates stay visible.
+    "Update available · 0.158.0 → 0.159.0\n  3. Skip until next version\nenter continue ·\nesc skip   \n",
+])
+func codexSharedUpdatePickerIsBlocked(_ picker: String) {
+    let detection = upstreamDetection(.codex, picker, title: "project")
+    #expect(detection.state == .blocked, "\(picker)")
+    #expect(detection.ruleID == "startup_update", "\(picker)")
+    #expect(detection.visible)
+}
+
+@Test(arguments: [
+    // Passive history notice without the picker footer.
+    "Update available · 0.158.0 → 0.159.0\nRun npm install -g @openai/codex to update.\n",
+    // Footer without the picker heading.
+    "› 1. Update now\nenter continue · esc skip\n",
+    // A newer composer below the picker makes it historical.
+    "Update available · 0.158.0 → 0.159.0\nenter continue · esc skip\n› Ask Codex to do anything\n",
+    // Heading text quoted mid-line is not the picker heading.
+    "Changelog: Update available · shown on startup\nenter continue · esc skip\n",
+])
+func codexUpdatePickerNeedsBothLiveGates(_ screen: String) {
+    let detection = upstreamDetection(.codex, screen, title: "project")
+    #expect(detection.ruleID != "startup_update", "\(screen)")
 }
