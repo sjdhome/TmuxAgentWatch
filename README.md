@@ -178,6 +178,8 @@ for the full design rationale):
    `capture-pane -p` plus `#{pane_title}` are
    matched against per-agent rule manifests (regions, AND/OR/NOT gates,
    priority winner selection) bundled as `Resources/manifests.json`.
+   For Claude, an idle result is then rechecked by
+   `Detect/ClaudeBackgroundAgents.swift` (see below).
 4. **Debounce** (`Detect/StateStore.swift`) — Working→Idle needs two
    consecutive confirming polls unless the screen shows explicit idle
    chrome; new panes display idle for their first two observations; agent-owned
@@ -629,6 +631,28 @@ macOS 26.6.2: 160 tests, 365 runs including parameterized cases, no failures.
 preview toggles, wrapping, false positives, precedence, and transitions.
 No live Jev approval UI was validated. The existing AppIntents metadata
 warning remains.
+
+### Native Claude background-agent compatibility
+
+Added on **2026-10-19 (Asia/Shanghai)** after a wide Claude Code pane waiting
+on three background subagents read as idle. Herdr's
+`background_agents_working` rule (unchanged as of `916fcf8d`) checks only the
+last non-empty line above the prompt box, and in that layout the line was a
+right-aligned `128552 tokens` counter, not `✻ Waiting for 3 background agents
+to finish`; the prompt box rule then won.
+
+`ClaudeBackgroundAgents` runs only when the Claude manifest result is idle, so
+manifest blockers, working rules, and viewer states keep precedence. Above the
+prompt box, it skips trailing right-aligned token counters (at least two
+leading spaces) and requires the last remaining line to be Herdr's waiting
+line with a non-zero count. The result is `claude_background_agents_waiting`.
+Zero counts, left-aligned or other text after the waiting line, quoted prompt
+text, and screens without a prompt box stay unmatched. The subagent list
+below the prompt box is not used as a signal: its finished-row shape was not
+observed. Remove this shim when Herdr's rule tolerates the counter.
+
+Validation: `ClaudeBackgroundAgentsTests.swift` uses synthetic chrome modeled
+on the reported layout; the standard unit-test command passed on Xcode 27.1.
 
 ## Rejected features
 

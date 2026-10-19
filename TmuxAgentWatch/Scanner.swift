@@ -135,7 +135,14 @@ nonisolated enum Scanner {
         guard let manifestID = agent.manifestID, let manifest = Manifests.get(manifestID) else {
             return .knownAgentIdleFallback
         }
-        return evaluate(manifest: manifest, input: input)
+        let detection = evaluate(manifest: manifest, input: input)
+        // Only overrides idle, so manifest blockers and viewers keep precedence.
+        if agent == .claude, detection.state == .idle,
+            let background = ClaudeBackgroundAgents.detect(screen: screen)
+        {
+            return background
+        }
+        return detection
     }
 
     /// The engine input is the visible screen with trailing blank rows
