@@ -296,6 +296,45 @@ from herdr's `src/detect/mod.rs`.
 
 ### Upstream sync baseline
 
+Synced on **2026-11-19 (Asia/Shanghai)** to Herdr
+[`ee5bfb5041bb3e4a49d591c72308aae3c81ecdde`](https://github.com/ogulcancelik/herdr/commit/ee5bfb5041bb3e4a49d591c72308aae3c81ecdde),
+from `916fcf8d`. Its detection sources match the last detection change,
+`43b36b68`. All 22 bundled manifests and the detection engine
+(`src/detect/manifest.rs`) are unchanged upstream; only process identification
+(`src/detect/mod.rs`) changed.
+
+- Hermes recognizes the newer expanded installer bootstrap (`43b36b68`, #5518,
+  refs #5068). When the line after `import os, re, sys` starts with `import `,
+  `AgentIdentifier.hermesInstallerAgentName` still requires the captured
+  environment-cleanup prefix and a valid installation root (non-empty, free of
+  quotes, backslashes, and line breaks), then matches an
+  `import hermes_bootstrap` line (top-level or 4-space indented) plus the
+  trailing `hermes_cli.main` entry block so recovery-helper edits do not break
+  identification. The short #4910 bootstrap keeps exact matching, and
+  `--run-module`, `--print-runtime-command`, and non-`-I -c` invocations remain
+  rejected.
+
+Upstream's other 18 commits since `916fcf8d` are out of scope: Herdr macOS
+server lifecycle (`b431a063`), pane resize/appearance/shutdown handling
+(`143bf5fd`, `e97c344a`, `6b526626`, `3f5032c9`, `ff5881ef`), remote `tcsh`
+startup (`65da135f`), Wayland clipboard timeouts (`de8503c1`), Windows
+SSH/POSIX scripts (`77a176eb`, `ccc7521a`), `opencode`/`kilo` XDG integration
+installation (`2713feb5`), and release/test/CI/doc updates. The `950d012c`
+suspended-agent retention and the local Pi and Claude shims remain unchanged.
+
+No settings migration is needed. The manifest engine remains version 3;
+bundled manifests, polling, debounce, and Pi/Claude shim precedence are
+unchanged.
+
+Validation: the documented Xcode unit-test command passed on Xcode 27.2 with
+`CODE_SIGN_IDENTITY=-` (the local Apple Development signing certificate was
+invalid/expired at validation time): 229 tests, 228 passed and the opt-in
+isolated-tmux test skipped, 555 runs including parameterized cases. The
+`ee5bfb50` section of `AgentIdentifierTests.swift` covers the expanded #5068
+Hermes launcher and its negative cases.
+
+#### Previous sync (916fcf8d)
+
 Synced on **2026-10-15 (Asia/Shanghai)** to Herdr
 [`916fcf8de029c6cac965b50f3cdb9687cd7d1537`](https://github.com/ogulcancelik/herdr/commit/916fcf8de029c6cac965b50f3cdb9687cd7d1537),
 from `4dc23bb1`. Its detection sources match the last detection change,
@@ -335,7 +374,7 @@ manifest rules and comments, and are not validated against live agent UIs.
 The converter needs Python 3.11+ (`tomllib`); where `python3` is older, run
 it through `uv run --no-project --python '>=3.11' python`.
 
-#### Previous sync (4dc23bb1)
+#### Earlier sync (4dc23bb1)
 
 Synced on **2026-10-08 (Asia/Shanghai)** to Herdr
 [`4dc23bb15d4a2fd2c093abfb509f903c3015bf56`](https://github.com/ogulcancelik/herdr/commit/4dc23bb15d4a2fd2c093abfb509f903c3015bf56),

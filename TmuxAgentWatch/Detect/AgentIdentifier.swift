@@ -125,9 +125,10 @@ nonisolated enum AgentIdentifier {
     // MARK: - Hermes installer bootstrap
 
     /// Hermes' installer launches `python -I -c <bootstrap> [args…]`. Recognize
-    /// only that captured bootstrap, not arbitrary Python source: both root
-    /// literals must agree, and quotes or escapes are rejected rather than
-    /// parsed. Helper modes run other modules and are not the agent.
+    /// only the captured short (#4910) and expanded (#5068) installer bootstraps,
+    /// not arbitrary Python source. Quotes or escapes in the installation root
+    /// are rejected rather than parsed. Helper modes run other modules and are
+    /// not the agent.
     static func hermesInstallerAgentName(_ argv: [String]) -> String? {
         guard argv.count >= 4, argv[1] == "-I", argv[2] == "-c" else { return nil }
         if let mode = argv.dropFirst(4).first,
@@ -137,8 +138,19 @@ nonisolated enum AgentIdentifier {
         }
 
         let code = argv[3]
-        guard code.hasPrefix(hermesInstallerPrefix) else { return nil }
-        let rest = code.dropFirst(hermesInstallerPrefix.count)
+        guard code.hasPrefix(hermesInstallerHeader) else { return nil }
+        var body = code.dropFirst(hermesInstallerHeader.count)
+        let expanded: Bool
+        if body.hasPrefix("import ") {
+            guard let newline = body.unicodeScalars.firstIndex(of: "\n") else { return nil }
+            body = body[body.unicodeScalars.index(after: newline)...]
+            expanded = true
+        } else {
+            expanded = false
+        }
+
+        guard body.hasPrefix(hermesInstallerPrefix) else { return nil }
+        let rest = body.dropFirst(hermesInstallerPrefix.count)
         guard let rootEnd = rest.range(of: "')\n") else { return nil }
         let root = rest[..<rootEnd.lowerBound]
         // Scalars, not Characters: "\r\n" is one grapheme and would slip past.
@@ -147,6 +159,19 @@ nonisolated enum AgentIdentifier {
             return nil
         }
         let tail = rest[rootEnd.upperBound...]
+        if expanded {
+            // Recovery helpers change independently of the interactive entry point.
+            guard tail.hasSuffix(hermesInstallerEntry) else { return nil }
+            let hasBootstrapImport = tail.unicodeScalars
+                .split(separator: "\n", omittingEmptySubsequences: false)
+                .contains { rawLine in
+                    let line = rawLine.last == "\r" ? rawLine.dropLast() : rawLine
+                    let text = String(line)
+                    return text == "import hermes_bootstrap"
+                        || text == "    import hermes_bootstrap"
+                }
+            return hasBootstrapImport ? Agent.hermes.label : nil
+        }
         guard tail.hasPrefix(hermesInstallerMiddle) else { return nil }
         let afterMiddle = tail.dropFirst(hermesInstallerMiddle.count)
         guard afterMiddle.hasPrefix(root) else { return nil }
@@ -154,10 +179,17 @@ nonisolated enum AgentIdentifier {
             ? Agent.hermes.label : nil
     }
 
-    // Installer source captured in herdr #4910. Only the installation root
+    private static let hermesInstallerHeader = "import os, re, sys\n"
+    private static let hermesInstallerEntry = #"""
+        from hermes_cli.main import main
+        sys.argv[0] = re.sub(r'(-script\.pyw|\.exe)?$', '', sys.argv[0])
+        sys.exit(main())
+
+        """#
+
+    // Short installer source captured in herdr #4910. Only the installation root
     // varies; unknown bootstrap revisions fall back to ordinary identification.
     private static let hermesInstallerPrefix = """
-        import os, re, sys
         os.environ.pop('PYTHONHOME', None)
         os.environ.pop('PYTHONPATH', None)
         sys.path.insert(0, '

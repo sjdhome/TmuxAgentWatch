@@ -480,6 +480,109 @@ func nonEntrypointMastracodePathsAreIgnored(_ script: String) {
     #expect(AgentIdentifier.identifyAgent(in: job) == nil)
 }
 
+// MARK: - Herdr ee5bfb50 identification regressions
+
+// Representative excerpt of the expanded installer bootstrap captured in
+// herdr #5068, kept independent of the production constants.
+private let newerHermesInstallerCode = #"""
+    import os, re, sys
+    import contextlib, hashlib, io, pathlib, shutil, subprocess
+    os.environ.pop('PYTHONHOME', None)
+    os.environ.pop('PYTHONPATH', None)
+    sys.path.insert(0, '/Users/REDACTED/.hermes/hermes-agent')
+    def _hermes_closure_repair():
+        pass
+    if sys.argv[1:2] == ['--print-runtime-command']:
+        sys.dont_write_bytecode = True
+        sys.exit(0)
+    sys._hermes_pin_default_home = True
+    try:
+        import hermes_bootstrap
+    except Exception:
+        _hermes_closure_repair()
+        raise
+    if sys.argv[1:2] == ['--run-module']:
+        import runpy
+        sys.exit(0)
+    from hermes_cli.main import main
+    sys.argv[0] = re.sub(r'(-script\.pyw|\.exe)?$', '', sys.argv[0])
+    sys.exit(main())
+
+    """#
+
+@Test func newerHermesInstallerCaptureIsDetected() {
+    let job = ForegroundJob(
+        processGroupID: 13565,
+        processes: [
+            ForegroundProcess(
+                pid: 13565, name: "python3.14", argv0: "python3",
+                argv: [hermesPython, "-I", "-c", newerHermesInstallerCode],
+                cmdline: "\(hermesPython) -I -c \(newerHermesInstallerCode)")
+        ])
+    let found = AgentIdentifier.identifyAgent(in: job)
+    #expect(found?.0 == .hermes)
+    #expect(found?.1 == "hermes")
+
+    let adapted = newerHermesInstallerCode
+        .replacingOccurrences(
+            of: hermesInstallerRoot, with: "/opt/another install/hermes-agent"
+        )
+        .replacingOccurrences(
+            of: "import contextlib, hashlib, io, pathlib, shutil, subprocess",
+            with: "import contextlib, hashlib, io, pathlib, shutil, subprocess, warnings"
+        )
+    let adaptedArgv = [hermesPython, "-I", "-c", adapted, "--resume", "session-id"]
+    let adaptedJob = ForegroundJob(
+        processGroupID: 13565,
+        processes: [
+            ForegroundProcess(
+                pid: 13565, name: "python3.14", argv0: "python3",
+                argv: adaptedArgv, cmdline: adaptedArgv.joined(separator: " "))
+        ])
+    let adaptedFound = AgentIdentifier.identifyAgent(in: adaptedJob)
+    #expect(adaptedFound?.0 == .hermes)
+    #expect(adaptedFound?.1 == "hermes")
+}
+
+@Test func newerHermesInstallerAcceptsTopLevelBootstrapImport() {
+    let code = newerHermesInstallerCode.replacingOccurrences(
+        of: "    import hermes_bootstrap", with: "import hermes_bootstrap")
+    #expect(AgentIdentifier.hermesInstallerAgentName([hermesPython, "-I", "-c", code]) == "hermes")
+}
+
+@Test(arguments: [
+    "print('hermes_cli.main')",
+    "'''\(newerHermesInstallerCode)'''",
+    newerHermesInstallerCode.split(separator: "\n", omittingEmptySubsequences: false)
+        .map { "# \($0)\n" }.joined(),
+    newerHermesInstallerCode.replacingOccurrences(
+        of: "from hermes_cli.main import main", with: "from unrelated.main import main"),
+    newerHermesInstallerCode.replacingOccurrences(
+        of: "sys.exit(main())", with: "sys.exit(0)"),
+    newerHermesInstallerCode.replacingOccurrences(
+        of: "import hermes_bootstrap", with: "import unrelated_bootstrap"),
+    newerHermesInstallerCode.replacingOccurrences(
+        of: "/Users/REDACTED", with: #"/Users/has\escape"#),
+    newerHermesInstallerCode.replacingOccurrences(
+        of: "/Users/REDACTED", with: "/Users/has'quote"),
+    newerHermesInstallerCode.replacingOccurrences(
+        of: "/Users/REDACTED", with: "/Users/has\r\nbreak"),
+])
+func newerHermesInstallerRejectsNonEntrySourceAndUnsafeRoots(_ code: String) {
+    #expect(AgentIdentifier.hermesInstallerAgentName([hermesPython, "-I", "-c", code]) == nil)
+}
+
+@Test(arguments: ["--run-module", "--print-runtime-command"])
+func newerHermesInstallerHelperModesAreIgnored(_ mode: String) {
+    let argv = [hermesPython, "-I", "-c", newerHermesInstallerCode, mode]
+    #expect(AgentIdentifier.hermesInstallerAgentName(argv) == nil)
+}
+
+@Test func newerHermesInstallerRejectsModuleInvocation() {
+    let argv = [hermesPython, "-m", "-c", newerHermesInstallerCode]
+    #expect(AgentIdentifier.hermesInstallerAgentName(argv) == nil)
+}
+
 // MARK: - KERN_PROCARGS2 parsing
 
 private func procargs2Buffer(_ argc: Int32, _ execPath: String, _ strings: [String]) -> [UInt8] {
